@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PiCar-X Unified Console</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <div>
+          <p class="eyebrow">PiCar-X Unified</p>
+          <h1>Drive, look, speak, relay, and inspect the scene from one dashboard.</h1>
+          <p class="subtitle">
+            Browser control for SunFounder PiCar-X with safety limits, camera streaming,
+            relay mode, AI reply mode, and automatic person greeting.
+          </p>
+        </div>
+        <div class="status-grid">
+          <div class="status-card">
+            <span>Voice mode</span>
+            <strong id="voice-mode-label">mute</strong>
+          </div>
+          <div class="status-card">
+            <span>Audio target</span>
+            <strong id="audio-target-label">car</strong>
+          </div>
+          <div class="status-card">
+            <span>Hardware</span>
+            <strong id="hardware-label">loading</strong>
+          </div>
+          <div class="status-card">
+            <span>Emergency</span>
+            <strong id="estop-label">clear</strong>
+          </div>
+        </div>
+      </section>
+
+      <section class="grid">
+        <article class="panel video-panel">
+          <div class="panel-header">
+            <h2>Camera</h2>
+            <button id="center-camera-btn" class="secondary">Center Camera</button>
+          </div>
+          <img id="video-stream" src="/stream.mjpg" alt="PiCar-X live stream" />
+          <div class="sliders">
+            <label>
+              <span>Pan</span>
+              <input id="pan-slider" type="range" min="-70" max="70" value="0" />
+            </label>
+            <label>
+              <span>Tilt</span>
+              <input id="tilt-slider" type="range" min="-35" max="35" value="0" />
+            </label>
+          </div>
+          <p id="vision-summary" class="hint">Waiting for camera summary...</p>
+        </article>
+
+        <article class="panel control-panel">
+          <div class="panel-header">
+            <h2>Drive</h2>
+            <button id="stop-btn" class="danger">Emergency Stop</button>
+          </div>
+          <div class="drive-pad">
+            <button class="drive" data-speed="35" data-steering="0">Forward</button>
+            <div class="drive-row">
+              <button class="drive" data-speed="25" data-steering="-25">Left</button>
+              <button class="drive neutral" data-speed="0" data-steering="0">Stop</button>
+              <button class="drive" data-speed="25" data-steering="25">Right</button>
+            </div>
+            <button class="drive" data-speed="-25" data-steering="0">Reverse</button>
+          </div>
+          <div class="control-inline">
+            <button id="clear-estop-btn" class="secondary">Reset E-Stop</button>
+            <button id="refresh-btn" class="secondary">Refresh State</button>
+          </div>
+          <p class="hint">
+            Hold drive buttons or use keyboard: <code>W A S D</code>. Releasing the control
+            sends a stop command and the backend watchdog stops stale motion automatically.
+          </p>
+        </article>
+
+        <article class="panel voice-panel">
+          <div class="panel-header">
+            <h2>Voice</h2>
+          </div>
+          <div class="selectors">
+            <label>
+              <span>Mode</span>
+              <select id="voice-mode-select">
+                <option value="mute">Mute</option>
+                <option value="relay">Relay</option>
+                <option value="ai_reply">AI Reply</option>
+              </select>
+            </label>
+            <label>
+              <span>Audio target</span>
+              <select id="audio-target-select">
+                <option value="car">Car speaker</option>
+                <option value="browser">Computer speaker</option>
+                <option value="both">Both</option>
+              </select>
+            </label>
+          </div>
+          <button id="push-to-talk-btn" class="accent">Hold To Talk</button>
+          <p id="speech-status" class="hint">
+            Relay mode streams your mic to the selected speaker target. AI Reply mode captures
+            your speech, sends the transcript to the robot, then speaks the answer.
+          </p>
+          <div id="messages" class="messages"></div>
+        </article>
+
+        <article class="panel vision-panel">
+          <div class="panel-header">
+            <h2>Ask About The Scene</h2>
+          </div>
+          <form id="vision-form">
+            <label>
+              <span>Question</span>
+              <input id="vision-question" type="text" placeholder="What do you see right now?" />
+            </label>
+            <button type="submit" class="accent">Ask Vision</button>
+          </form>
+          <pre id="vision-answer" class="answer-box">No answer yet.</pre>
+        </article>
+      </section>
+    </main>
+
+    <script type="module" src="/static/app.js"></script>
+  </body>
+  </html>

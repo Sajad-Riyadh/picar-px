@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "picarx-unified"
+version = "0.1.0"
+description = "Unified FastAPI control stack for SunFounder PiCar-X on Raspberry Pi 5."
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+  { name = "OpenAI Codex" }
+]
+dependencies = [
+  "fastapi>=0.115.0",
+  "uvicorn[standard]>=0.30.0",
+  "filelock>=3.16.1",
+  "numpy>=1.26.0",
+  "opencv-python-headless>=4.10.0.84",
+  "pydantic>=2.9.0",
+  "openai>=1.51.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"picarx_unified" = ["static/*"]

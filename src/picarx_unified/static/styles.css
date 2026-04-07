@@ -1,0 +1,258 @@
+:root {
+  --bg: #0f1720;
+  --panel: #162231;
+  --panel-2: #101923;
+  --line: rgba(255, 255, 255, 0.12);
+  --text: #eef3f8;
+  --muted: #98a8b9;
+  --accent: #ffb347;
+  --accent-2: #7dd3fc;
+  --danger: #ff6b6b;
+  --shadow: 0 24px 60px rgba(0, 0, 0, 0.28);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+  background:
+    radial-gradient(circle at top left, rgba(125, 211, 252, 0.16), transparent 32%),
+    radial-gradient(circle at top right, rgba(255, 179, 71, 0.12), transparent 28%),
+    linear-gradient(180deg, #0b131c 0%, var(--bg) 40%, #0a1017 100%);
+  color: var(--text);
+}
+
+.shell {
+  width: min(1280px, calc(100% - 32px));
+  margin: 0 auto;
+  padding: 24px 0 36px;
+}
+
+.hero {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: 1.3fr 1fr;
+  align-items: end;
+  margin-bottom: 22px;
+}
+
+.eyebrow {
+  margin: 0 0 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: var(--accent);
+  font-size: 0.8rem;
+}
+
+.hero h1 {
+  margin: 0;
+  font-size: clamp(2rem, 5vw, 3.4rem);
+  line-height: 1.05;
+}
+
+.subtitle {
+  max-width: 60ch;
+  color: var(--muted);
+}
+
+.status-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.status-card,
+.panel {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.01));
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  box-shadow: var(--shadow);
+}
+
+.status-card {
+  padding: 14px 16px;
+}
+
+.status-card span {
+  display: block;
+  color: var(--muted);
+  font-size: 0.85rem;
+  margin-bottom: 4px;
+}
+
+.status-card strong {
+  font-size: 1.05rem;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.panel {
+  padding: 18px;
+}
+
+.panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.panel h2 {
+  margin: 0;
+  font-size: 1.2rem;
+}
+
+#video-stream {
+  display: block;
+  width: 100%;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  min-height: 240px;
+  object-fit: cover;
+}
+
+.sliders,
+.selectors {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+label {
+  display: grid;
+  gap: 8px;
+}
+
+label span,
+.hint {
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+input[type="range"],
+input[type="text"],
+select,
+button {
+  width: 100%;
+}
+
+input[type="text"],
+select {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px 14px;
+}
+
+button {
+  border: none;
+  border-radius: 14px;
+  padding: 12px 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 120ms ease;
+}
+
+button:hover {
+  transform: translateY(-1px);
+}
+
+button:active {
+  transform: translateY(1px);
+}
+
+.accent {
+  background: linear-gradient(135deg, var(--accent), #ffcf77);
+  color: #241300;
+}
+
+.secondary {
+  background: rgba(125, 211, 252, 0.12);
+  color: var(--accent-2);
+  border: 1px solid rgba(125, 211, 252, 0.24);
+}
+
+.danger {
+  background: linear-gradient(135deg, #ff7878, var(--danger));
+  color: white;
+}
+
+.drive-pad {
+  display: grid;
+  gap: 12px;
+}
+
+.drive-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.drive {
+  min-height: 56px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+  border: 1px solid var(--line);
+}
+
+.drive.neutral {
+  background: rgba(255, 179, 71, 0.12);
+  color: var(--accent);
+}
+
+.control-inline {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.messages,
+.answer-box {
+  min-height: 180px;
+  margin-top: 14px;
+  padding: 14px;
+  border-radius: 14px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  overflow: auto;
+}
+
+.message {
+  padding: 10px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.message:last-child {
+  border-bottom: none;
+}
+
+.message .role {
+  display: block;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent-2);
+  margin-bottom: 4px;
+}
+
+code {
+  font-family: "Cascadia Code", Consolas, monospace;
+}
+
+@media (max-width: 960px) {
+  .hero,
+  .grid {
+    grid-template-columns: 1fr;
+  }
+}

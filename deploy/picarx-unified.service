@@ -1,0 +1,18 @@
+[Unit]
+Description=PiCar-X Unified Control Stack
+After=network-online.target sound.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/picarx-unified
+Environment=PICARX_HOST=0.0.0.0
+Environment=PICARX_PORT=8080
+ExecStart=/opt/picarx-unified/.venv/bin/python -m picarx_unified
+Restart=on-failure
+RestartSec=3
+User=root
+Group=root
+
+[Install]
+WantedBy=multi-user.target
