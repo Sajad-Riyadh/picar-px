@@ -46,16 +46,19 @@ class CameraService:
         self._running = False
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=1.0)
+        self._thread = None
         if self._camera is not None:
             try:
                 self._camera.release()
             except Exception:
                 pass
+            self._camera = None
         if self._picamera is not None:
             try:
                 self._picamera.stop()
             except Exception:
                 pass
+            self._picamera = None
 
     def get_frame(self) -> np.ndarray | None:
         with self._lock:

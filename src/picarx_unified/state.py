@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import json
 import os
 import tempfile
@@ -7,6 +8,7 @@ from pathlib import Path
 from typing import Callable
 
 from filelock import FileLock
+from pydantic import ValidationError
 
 from .models import RobotSession, utc_now
 
@@ -36,12 +38,10 @@ class StateStore:
 
     def load(self) -> RobotSession:
         with self._lock:
+            session = self._load_locked()
             if not self._path.exists():
-                session = RobotSession()
                 self._write_locked(session)
-                return session
-            data = json.loads(self._path.read_text(encoding="utf-8"))
-            return RobotSession.model_validate(data)
+            return session
 
     def save(self, session: RobotSession) -> RobotSession:
         with self._lock:
@@ -51,16 +51,37 @@ class StateStore:
 
     def update(self, mutate: Callable[[RobotSession], None]) -> RobotSession:
         with self._lock:
-            if self._path.exists():
-                session = RobotSession.model_validate(
-                    json.loads(self._path.read_text(encoding="utf-8"))
-                )
-            else:
-                session = RobotSession()
+            session = self._load_locked()
             mutate(session)
             session.updated_at = utc_now()
             self._write_locked(session)
             return session
+
+    def _load_locked(self) -> RobotSession:
+        if not self._path.exists():
+            return RobotSession()
+        try:
+            data = json.loads(self._path.read_text(encoding="utf-8"))
+            return RobotSession.model_validate(data)
+        except (OSError, json.JSONDecodeError, TypeError, ValidationError, ValueError):
+            self._archive_corrupt_state()
+            return RobotSession()
+
+    def _archive_corrupt_state(self) -> None:
+        if not self._path.exists():
+            return
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        backup_path = self._path.with_suffix(f".corrupt-{timestamp}{self._path.suffix}")
+        counter = 1
+        while backup_path.exists():
+            backup_path = self._path.with_suffix(
+                f".corrupt-{timestamp}-{counter}{self._path.suffix}"
+            )
+            counter += 1
+        try:
+            os.replace(self._path, backup_path)
+        except OSError:
+            pass
 
     def _write_locked(self, session: RobotSession) -> None:
         atomic_write(

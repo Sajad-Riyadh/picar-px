@@ -1,15 +1,50 @@
+const CONFIG = {
+  driveRepeatMs: 250,
+  refreshIntervalMs: 2500,
+  maxMessages: 18,
+};
+
+const ENDPOINTS = {
+  state: "/api/state",
+  health: "/api/health",
+  drive: "/api/drive",
+  driveStop: "/api/drive/stop",
+  camera: "/api/camera",
+  voiceMode: "/api/voice/mode",
+  audioTarget: "/api/audio/target",
+  emergencyStop: "/api/emergency-stop",
+  emergencyReset: "/api/emergency-reset",
+  visionQuestion: "/api/vision/question",
+  voiceSocket: "/ws/voice",
+};
+
+const DRIVE_KEYMAP = {
+  w: { speed: 35, steering: 0 },
+  a: { speed: 25, steering: -25 },
+  d: { speed: 25, steering: 25 },
+  s: { speed: -25, steering: 0 },
+};
+
 const state = {
   session: null,
   audioContext: null,
   playbackCursor: 0,
   ws: null,
+  socketPromise: null,
   mediaStream: null,
   sourceNode: null,
   workletNode: null,
+  monitorNode: null,
   captureActive: false,
+  awaitingReply: false,
   recognition: null,
   transcript: "",
   driveInterval: null,
+  activeDriveButton: null,
+  driveCommand: null,
+  activeKey: null,
+  refreshPromise: null,
+  refreshQueued: false,
 };
 
 const el = {
@@ -17,11 +52,21 @@ const el = {
   audioTargetLabel: document.querySelector("#audio-target-label"),
   hardwareLabel: document.querySelector("#hardware-label"),
   estopLabel: document.querySelector("#estop-label"),
+  sessionUpdatedLabel: document.querySelector("#session-updated-label"),
+  driveStateLabel: document.querySelector("#drive-state-label"),
+  cameraStateLabel: document.querySelector("#camera-state-label"),
+  driveSummaryLabel: document.querySelector("#drive-summary-label"),
+  cameraSummaryLabel: document.querySelector("#camera-summary-label"),
+  visionUpdatedLabel: document.querySelector("#vision-updated-label"),
+  systemStatusLabel: document.querySelector("#system-status-label"),
   panSlider: document.querySelector("#pan-slider"),
   tiltSlider: document.querySelector("#tilt-slider"),
+  panValue: document.querySelector("#pan-value"),
+  tiltValue: document.querySelector("#tilt-value"),
   visionSummary: document.querySelector("#vision-summary"),
   speechStatus: document.querySelector("#speech-status"),
   messages: document.querySelector("#messages"),
+  messageCountLabel: document.querySelector("#message-count-label"),
   visionAnswer: document.querySelector("#vision-answer"),
   voiceModeSelect: document.querySelector("#voice-mode-select"),
   audioTargetSelect: document.querySelector("#audio-target-select"),
@@ -32,22 +77,154 @@ const el = {
   refresh: document.querySelector("#refresh-btn"),
   visionForm: document.querySelector("#vision-form"),
   visionQuestion: document.querySelector("#vision-question"),
+  driveButtons: [...document.querySelectorAll(".drive")],
+  promptChips: [...document.querySelectorAll(".prompt-chip")],
 };
+
+function titleCase(value) {
+  return String(value ?? "")
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function signed(value) {
+  return value > 0 ? `+${value}` : `${value}`;
+}
+
+function formatTimestamp(value) {
+  if (!value) {
+    return "Pending";
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "Pending";
+  }
+  return new Intl.DateTimeFormat(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+    second: "2-digit",
+  }).format(date);
+}
+
+function formatDriveSummary(drive) {
+  if (!drive || drive.speed === 0) {
+    return "Stopped";
+  }
+  const direction = drive.speed > 0 ? "Forward" : "Reverse";
+  if (drive.steering === 0) {
+    return `${direction} ${Math.abs(drive.speed)}`;
+  }
+  return `${direction} ${Math.abs(drive.speed)} / steer ${signed(drive.steering)}`;
+}
+
+function formatCameraSummary(camera) {
+  if (!camera || (camera.pan === 0 && camera.tilt === 0)) {
+    return "Centered";
+  }
+  return `Pan ${signed(camera.pan)} / Tilt ${signed(camera.tilt)}`;
+}
+
+function formatSystemStatus(session) {
+  if (!session) {
+    return "Connecting";
+  }
+  if (session.emergency_stop) {
+    return "Safety Hold";
+  }
+  if (session.browser_connected) {
+    return "Browser Linked";
+  }
+  return "Standby";
+}
+
+function defaultVoiceHint(mode) {
+  if (mode === "relay") {
+    return "Relay mode streams your mic to the selected audio target.";
+  }
+  if (mode === "ai_reply") {
+    return "AI Reply mode records your speech, commits the turn, and returns spoken output.";
+  }
+  return "Microphone is idle. Choose Relay or AI Reply to open the voice path.";
+}
+
+function toneForVoiceMode(mode) {
+  if (mode === "relay") {
+    return "cool";
+  }
+  if (mode === "ai_reply") {
+    return "warm";
+  }
+  return "neutral";
+}
+
+function setButtonActive(button, isActive) {
+  if (!button) {
+    return;
+  }
+  button.dataset.active = isActive ? "true" : "false";
+  button.setAttribute("aria-pressed", isActive ? "true" : "false");
+}
+
+function setCardTone(node, tone) {
+  const card = node.closest(".status-card, .telemetry-card");
+  if (card) {
+    card.dataset.tone = tone;
+  }
+}
+
+function updateMessageCount() {
+  const count = el.messages.childElementCount;
+  el.messageCountLabel.textContent = `${count} ${count === 1 ? "entry" : "entries"}`;
+}
+
+function setSpeechStatus(message, tone = "neutral") {
+  el.speechStatus.textContent = message;
+  el.speechStatus.dataset.tone = tone;
+}
+
+function syncRangeReadouts() {
+  el.panValue.textContent = `${el.panSlider.value}deg`;
+  el.tiltValue.textContent = `${el.tiltSlider.value}deg`;
+}
 
 function logMessage(role, text) {
   const row = document.createElement("div");
-  row.className = "message";
-  row.innerHTML = `<span class="role">${role}</span><div>${text}</div>`;
+  row.className = `message message-${role}`;
+
+  const head = document.createElement("div");
+  head.className = "message-head";
+
+  const rolePill = document.createElement("span");
+  rolePill.className = "role-pill";
+  rolePill.textContent = titleCase(role);
+
+  const stamp = document.createElement("span");
+  stamp.className = "message-time";
+  stamp.textContent = formatTimestamp(new Date().toISOString());
+
+  const body = document.createElement("div");
+  body.className = "message-body";
+  body.textContent = text;
+
+  head.append(rolePill, stamp);
+  row.append(head, body);
   el.messages.prepend(row);
+
+  while (el.messages.childElementCount > CONFIG.maxMessages) {
+    el.messages.lastElementChild?.remove();
+  }
+  updateMessageCount();
 }
 
 async function api(path, options = {}) {
+  const headers = {
+    ...(options.json !== undefined ? { "Content-Type": "application/json" } : {}),
+    ...(options.headers ?? {}),
+  };
   const response = await fetch(path, {
-    headers: {
-      "Content-Type": "application/json",
-      ...(options.headers ?? {}),
-    },
     ...options,
+    headers,
+    body: options.json !== undefined ? JSON.stringify(options.json) : options.body,
   });
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
@@ -58,20 +235,78 @@ async function api(path, options = {}) {
 
 function render(session) {
   state.session = session;
-  el.voiceModeLabel.textContent = session.voice_mode;
-  el.audioTargetLabel.textContent = session.audio_target;
-  el.estopLabel.textContent = session.emergency_stop ? "active" : "clear";
-  el.panSlider.value = session.camera.pan;
-  el.tiltSlider.value = session.camera.tilt;
+  document.body.dataset.estop = session.emergency_stop ? "active" : "clear";
+
+  el.voiceModeLabel.textContent = titleCase(session.voice_mode);
+  el.audioTargetLabel.textContent = titleCase(session.audio_target);
+  el.estopLabel.textContent = session.emergency_stop ? "Active" : "Clear";
+  el.sessionUpdatedLabel.textContent = formatTimestamp(session.updated_at);
+  el.driveStateLabel.textContent = `${signed(session.drive.speed)} spd / ${signed(session.drive.steering)} str`;
+  el.cameraStateLabel.textContent = `P ${signed(session.camera.pan)}deg / T ${signed(session.camera.tilt)}deg`;
+  el.driveSummaryLabel.textContent = formatDriveSummary(session.drive);
+  el.cameraSummaryLabel.textContent = formatCameraSummary(session.camera);
+  el.visionUpdatedLabel.textContent = formatTimestamp(session.vision.analyzed_at);
+  el.systemStatusLabel.textContent = formatSystemStatus(session);
+  el.panSlider.value = String(session.camera.pan);
+  el.tiltSlider.value = String(session.camera.tilt);
   el.voiceModeSelect.value = session.voice_mode;
   el.audioTargetSelect.value = session.audio_target;
   el.visionSummary.textContent = session.vision.summary;
+
+  syncRangeReadouts();
+
+  setCardTone(el.voiceModeLabel, toneForVoiceMode(session.voice_mode));
+  setCardTone(el.audioTargetLabel, session.audio_target === "both" ? "warm" : "cool");
+  setCardTone(el.estopLabel, session.emergency_stop ? "danger" : "ok");
+  setCardTone(el.driveSummaryLabel, session.drive.speed === 0 ? "neutral" : "warm");
+  setCardTone(
+    el.cameraSummaryLabel,
+    session.camera.pan === 0 && session.camera.tilt === 0 ? "neutral" : "cool"
+  );
+  setCardTone(
+    el.systemStatusLabel,
+    session.emergency_stop ? "danger" : session.browser_connected ? "ok" : "neutral"
+  );
+
+  if (!state.captureActive && !state.awaitingReply) {
+    setSpeechStatus(defaultVoiceHint(session.voice_mode), toneForVoiceMode(session.voice_mode));
+  }
+}
+
+function renderHealth(health) {
+  const hardwareText = `${titleCase(health.hardware_backend)} / ${titleCase(health.camera_backend)}`;
+  el.hardwareLabel.textContent = hardwareText;
+  const looksMock =
+    hardwareText.toLowerCase().includes("mock") || health.camera_backend.toLowerCase() === "none";
+  setCardTone(el.hardwareLabel, looksMock ? "neutral" : "ok");
 }
 
 async function refreshState() {
-  const [session, health] = await Promise.all([api("/api/state"), api("/api/health")]);
-  render(session);
-  el.hardwareLabel.textContent = `${health.hardware_backend} / ${health.camera_backend}`;
+  if (state.refreshPromise) {
+    state.refreshQueued = true;
+    return state.refreshPromise;
+  }
+
+  state.refreshPromise = (async () => {
+    const [session, health] = await Promise.all([
+      api(ENDPOINTS.state),
+      api(ENDPOINTS.health),
+    ]);
+    render(session);
+    renderHealth(health);
+  })();
+
+  try {
+    await state.refreshPromise;
+  } finally {
+    state.refreshPromise = null;
+    if (state.refreshQueued) {
+      state.refreshQueued = false;
+      queueMicrotask(() => {
+        refreshState().catch(() => null);
+      });
+    }
+  }
 }
 
 function base64FromArrayBuffer(buffer) {
@@ -103,41 +338,120 @@ async function ensureAudioContext() {
   return state.audioContext;
 }
 
+function teardownCapturePipeline() {
+  if (state.sourceNode) {
+    state.sourceNode.disconnect();
+    state.sourceNode = null;
+  }
+  if (state.workletNode) {
+    state.workletNode.disconnect();
+    state.workletNode = null;
+  }
+  if (state.monitorNode) {
+    state.monitorNode.disconnect();
+    state.monitorNode = null;
+  }
+  if (state.mediaStream) {
+    state.mediaStream.getTracks().forEach((track) => track.stop());
+    state.mediaStream = null;
+  }
+}
+
+function closeVoiceSocket(reason = "Client closing") {
+  if (!state.ws) {
+    return;
+  }
+  try {
+    state.ws.close(1000, reason);
+  } catch (_error) {
+    // Ignore socket close races during shutdown.
+  }
+  state.ws = null;
+  state.socketPromise = null;
+}
+
+function handleVoiceSocketMessage(payload) {
+  if (payload.type === "state") {
+    render(payload.state);
+    return;
+  }
+  if (payload.type === "relay_chunk") {
+    playRelayChunk(payload.audio, payload.sample_rate).catch(() => null);
+    return;
+  }
+  if (payload.type === "assistant_audio") {
+    state.awaitingReply = false;
+    setSpeechStatus("Assistant response ready for playback.", "ok");
+    playAssistantAudio(payload.audio).catch(() => null);
+    return;
+  }
+  if (payload.type === "assistant_reply") {
+    state.awaitingReply = false;
+    setSpeechStatus("Assistant reply received.", "ok");
+    logMessage("robot", payload.text);
+    return;
+  }
+  if (payload.type === "transcript") {
+    logMessage("you", payload.text);
+    return;
+  }
+  if (payload.type === "error") {
+    state.awaitingReply = false;
+    setSpeechStatus(payload.message, "danger");
+  }
+}
+
 async function openVoiceSocket() {
-  if (state.ws && state.ws.readyState <= WebSocket.OPEN) {
+  if (state.ws?.readyState === WebSocket.OPEN) {
     return state.ws;
   }
+  if (state.socketPromise) {
+    return state.socketPromise;
+  }
+
   const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-  state.ws = new WebSocket(`${protocol}://${window.location.host}/ws/voice`);
-  state.ws.addEventListener("message", async (event) => {
-    const payload = JSON.parse(event.data);
-    if (payload.type === "state") {
-      render(payload.state);
-      return;
-    }
-    if (payload.type === "relay_chunk") {
-      await playRelayChunk(payload.audio, payload.sample_rate);
-      return;
-    }
-    if (payload.type === "assistant_audio") {
-      await playAssistantAudio(payload.audio);
-      return;
-    }
-    if (payload.type === "assistant_reply") {
-      logMessage("robot", payload.text);
-      return;
-    }
-    if (payload.type === "transcript") {
-      logMessage("you", payload.text);
-      return;
-    }
-    if (payload.type === "error") {
-      el.speechStatus.textContent = payload.message;
-    }
+  const socketUrl = `${protocol}://${window.location.host}${ENDPOINTS.voiceSocket}`;
+
+  state.socketPromise = new Promise((resolve, reject) => {
+    const socket = new WebSocket(socketUrl);
+    state.ws = socket;
+
+    socket.addEventListener("message", (event) => {
+      const payload = JSON.parse(event.data);
+      handleVoiceSocketMessage(payload);
+    });
+
+    socket.addEventListener(
+      "open",
+      () => {
+        resolve(socket);
+      },
+      { once: true }
+    );
+
+    socket.addEventListener(
+      "error",
+      () => {
+        reject(new Error("Unable to open the voice link."));
+      },
+      { once: true }
+    );
+
+    socket.addEventListener("close", () => {
+      state.ws = null;
+      state.socketPromise = null;
+      state.captureActive = false;
+      state.awaitingReply = false;
+      setButtonActive(el.pushToTalk, false);
+      setSpeechStatus("Voice link closed. Press and hold again to reconnect.", "neutral");
+    });
   });
-  return new Promise((resolve) => {
-    state.ws.addEventListener("open", () => resolve(state.ws), { once: true });
-  });
+
+  try {
+    return await state.socketPromise;
+  } finally {
+    state.socketPromise = null;
+  }
 }
 
 async function ensureCapturePipeline() {
@@ -148,6 +462,11 @@ async function ensureCapturePipeline() {
   state.mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
   state.sourceNode = state.audioContext.createMediaStreamSource(state.mediaStream);
   state.workletNode = new AudioWorkletNode(state.audioContext, "pcm-capture");
+
+  // Keep the worklet connected without playing mic monitoring through the speakers.
+  state.monitorNode = state.audioContext.createGain();
+  state.monitorNode.gain.value = 0;
+
   state.workletNode.port.onmessage = (event) => {
     if (!state.captureActive || !state.ws || state.ws.readyState !== WebSocket.OPEN) {
       return;
@@ -155,8 +474,10 @@ async function ensureCapturePipeline() {
     const audio = base64FromArrayBuffer(event.data);
     state.ws.send(JSON.stringify({ type: "pcm_chunk", audio }));
   };
+
   state.sourceNode.connect(state.workletNode);
-  state.workletNode.connect(state.audioContext.destination);
+  state.workletNode.connect(state.monitorNode);
+  state.monitorNode.connect(state.audioContext.destination);
 }
 
 function configureSpeechRecognition() {
@@ -178,38 +499,60 @@ function configureSpeechRecognition() {
 }
 
 async function startTalking() {
+  if (state.session?.voice_mode === "mute") {
+    setSpeechStatus("Switch voice mode out of Mute before opening the microphone.", "neutral");
+    return;
+  }
+
   await openVoiceSocket();
   await ensureCapturePipeline();
   configureSpeechRecognition();
+
   state.transcript = "";
+  state.awaitingReply = false;
   state.captureActive = true;
+  setButtonActive(el.pushToTalk, true);
+
   if (state.session?.voice_mode === "ai_reply" && state.recognition) {
     try {
       state.recognition.start();
-    } catch (error) {
+    } catch (_error) {
       // Recognition may already be active.
     }
   }
-  el.speechStatus.textContent = "Listening...";
+
+  setSpeechStatus("Listening for audio input...", "cool");
 }
 
 async function stopTalking() {
+  if (!state.captureActive) {
+    return;
+  }
+
   state.captureActive = false;
+  setButtonActive(el.pushToTalk, false);
+
   if (state.recognition) {
     try {
       state.recognition.stop();
-    } catch (error) {
+    } catch (_error) {
       // Ignore recognition stop races.
     }
   }
+
   if (!state.ws || state.ws.readyState !== WebSocket.OPEN) {
     return;
   }
+
   if (state.transcript) {
     state.ws.send(JSON.stringify({ type: "transcript", text: state.transcript }));
   }
+  state.awaitingReply = state.session?.voice_mode === "ai_reply";
   state.ws.send(JSON.stringify({ type: "commit" }));
-  el.speechStatus.textContent = "Waiting for reply...";
+  setSpeechStatus(
+    state.awaitingReply ? "Waiting for assistant reply..." : "Finishing relay...",
+    "warm"
+  );
 }
 
 async function playRelayChunk(audioBase64, sampleRate) {
@@ -242,158 +585,281 @@ async function playAssistantAudio(audioBase64) {
   source.start();
 }
 
-function bindDriveButton(button) {
-  const speed = Number(button.dataset.speed);
-  const steering = Number(button.dataset.steering);
-  const sendCommand = async () => {
-    try {
-      await api("/api/drive", {
-        method: "POST",
-        body: JSON.stringify({ speed, steering, source: "browser" }),
+async function applySessionAction(path, json) {
+  const session = await api(path, {
+    method: "POST",
+    ...(json !== undefined ? { json } : {}),
+  });
+  render(session);
+  return session;
+}
+
+async function sendDriveCommand(command) {
+  return applySessionAction(ENDPOINTS.drive, command);
+}
+
+function clearDriveLoop() {
+  window.clearInterval(state.driveInterval);
+  state.driveInterval = null;
+  state.driveCommand = null;
+  if (state.activeDriveButton) {
+    setButtonActive(state.activeDriveButton, false);
+    state.activeDriveButton = null;
+  }
+}
+
+async function stopDriveLoop() {
+  if (!state.driveInterval && !state.driveCommand) {
+    return;
+  }
+  clearDriveLoop();
+  const session = await api(ENDPOINTS.driveStop, { method: "POST" }).catch(() => null);
+  if (session) {
+    render(session);
+  }
+}
+
+async function startDriveLoop(command, button = null) {
+  if (state.session?.emergency_stop) {
+    setSpeechStatus("Reset emergency stop before driving.", "danger");
+    return;
+  }
+
+  if (
+    state.driveCommand &&
+    state.driveCommand.speed === command.speed &&
+    state.driveCommand.steering === command.steering &&
+    state.driveCommand.source === command.source
+  ) {
+    return;
+  }
+
+  clearDriveLoop();
+  state.driveCommand = command;
+  if (button) {
+    state.activeDriveButton = button;
+    setButtonActive(button, true);
+  }
+
+  try {
+    await sendDriveCommand(command);
+    state.driveInterval = window.setInterval(() => {
+      sendDriveCommand(command).catch((error) => {
+        clearDriveLoop();
+        setSpeechStatus(error.message, "danger");
+        api(ENDPOINTS.driveStop, { method: "POST" }).catch(() => null);
       });
-    } catch (error) {
-      el.speechStatus.textContent = error.message;
-    }
-  };
-  const start = async (event) => {
-    event.preventDefault();
-    if (state.session?.emergency_stop) {
-      el.speechStatus.textContent = "Reset emergency stop before driving.";
+    }, CONFIG.driveRepeatMs);
+  } catch (error) {
+    clearDriveLoop();
+    setSpeechStatus(error.message, "danger");
+  }
+}
+
+function bindMomentaryPointerControl(node, { start, stop }) {
+  let pointerId = null;
+
+  const release = () => {
+    if (pointerId === null) {
       return;
     }
-    await sendCommand();
-    state.driveInterval = window.setInterval(sendCommand, 250);
+    pointerId = null;
+    Promise.resolve(stop()).catch((error) => {
+      setSpeechStatus(error.message, "danger");
+    });
   };
-  const stop = async () => {
-    window.clearInterval(state.driveInterval);
-    state.driveInterval = null;
-    await api("/api/drive/stop", { method: "POST" }).catch(() => null);
+
+  node.addEventListener("pointerdown", (event) => {
+    if (pointerId !== null || (event.pointerType === "mouse" && event.button !== 0)) {
+      return;
+    }
+    pointerId = event.pointerId;
+    try {
+      node.setPointerCapture(event.pointerId);
+    } catch (_error) {
+      // Pointer capture is best-effort across browsers.
+    }
+    event.preventDefault();
+    Promise.resolve(start(event)).catch((error) => {
+      pointerId = null;
+      setSpeechStatus(error.message, "danger");
+    });
+  });
+
+  node.addEventListener("pointerup", release);
+  node.addEventListener("pointercancel", release);
+  node.addEventListener("lostpointercapture", release);
+  node.addEventListener("contextmenu", (event) => event.preventDefault());
+}
+
+function bindDriveButton(button) {
+  const command = {
+    speed: Number(button.dataset.speed),
+    steering: Number(button.dataset.steering),
+    source: "browser",
   };
-  ["mousedown", "touchstart"].forEach((eventName) => button.addEventListener(eventName, start));
-  ["mouseup", "mouseleave", "touchend", "touchcancel"].forEach((eventName) =>
-    button.addEventListener(eventName, stop)
-  );
+
+  bindMomentaryPointerControl(button, {
+    start: () => startDriveLoop(command, button),
+    stop: () => stopDriveLoop(),
+  });
 }
 
 function bindKeyboard() {
-  const keymap = {
-    w: { speed: 35, steering: 0 },
-    a: { speed: 25, steering: -25 },
-    d: { speed: 25, steering: 25 },
-    s: { speed: -25, steering: 0 },
-  };
-  let activeKey = null;
-  window.addEventListener("keydown", async (event) => {
-    if (activeKey || !keymap[event.key]) {
+  window.addEventListener("keydown", (event) => {
+    const key = event.key.toLowerCase();
+    if (!DRIVE_KEYMAP[key] || state.activeKey === key || event.repeat) {
       return;
     }
-    activeKey = event.key;
-    const command = keymap[event.key];
-    await api("/api/drive", {
-      method: "POST",
-      body: JSON.stringify({ ...command, source: "keyboard" }),
-    }).catch(() => null);
+    state.activeKey = key;
+    event.preventDefault();
+    startDriveLoop({ ...DRIVE_KEYMAP[key], source: "keyboard" }).catch(() => null);
   });
-  window.addEventListener("keyup", async (event) => {
-    if (event.key !== activeKey) {
+
+  window.addEventListener("keyup", (event) => {
+    if (event.key.toLowerCase() !== state.activeKey) {
       return;
     }
-    activeKey = null;
-    await api("/api/drive/stop", { method: "POST" }).catch(() => null);
+    state.activeKey = null;
+    stopDriveLoop().catch(() => null);
+  });
+
+  window.addEventListener("blur", () => {
+    state.activeKey = null;
+    stopDriveLoop().catch(() => null);
+    stopTalking().catch(() => null);
   });
 }
 
 async function updateCamera() {
-  await api("/api/camera", {
-    method: "POST",
-    body: JSON.stringify({
-      pan: Number(el.panSlider.value),
-      tilt: Number(el.tiltSlider.value),
-    }),
+  await applySessionAction(ENDPOINTS.camera, {
+    pan: Number(el.panSlider.value),
+    tilt: Number(el.tiltSlider.value),
   });
-  await refreshState();
+}
+
+async function submitVisionQuestion(question) {
+  if (!question) {
+    return;
+  }
+  el.visionAnswer.textContent = "Thinking...";
+  try {
+    const response = await api(ENDPOINTS.visionQuestion, {
+      method: "POST",
+      json: { question },
+    });
+    el.visionAnswer.textContent = response.answer;
+  } catch (error) {
+    el.visionAnswer.textContent = error.message;
+  }
+}
+
+function stopDriveOnUnload() {
+  const payload = new Blob(["{}"], { type: "application/json" });
+  if (navigator.sendBeacon) {
+    navigator.sendBeacon(ENDPOINTS.driveStop, payload);
+    return;
+  }
+  fetch(ENDPOINTS.driveStop, {
+    method: "POST",
+    body: "{}",
+    headers: { "Content-Type": "application/json" },
+    keepalive: true,
+  }).catch(() => null);
+}
+
+function registerGlobalCleanup() {
+  window.addEventListener("beforeunload", () => {
+    stopDriveOnUnload();
+    teardownCapturePipeline();
+    closeVoiceSocket("Browser unloading");
+  });
 }
 
 async function init() {
-  document.querySelectorAll(".drive").forEach(bindDriveButton);
+  el.driveButtons.forEach((button) => {
+    setButtonActive(button, false);
+    bindDriveButton(button);
+  });
+  setButtonActive(el.pushToTalk, false);
+
   bindKeyboard();
+  registerGlobalCleanup();
+  syncRangeReadouts();
+  updateMessageCount();
   await refreshState();
-  await openVoiceSocket();
+
+  openVoiceSocket().catch((error) => {
+    setSpeechStatus(error.message, "danger");
+    logMessage("system", "Voice controls will reconnect automatically the next time you talk.");
+  });
 
   el.voiceModeSelect.addEventListener("change", async () => {
-    await api("/api/voice/mode", {
-      method: "POST",
-      body: JSON.stringify({ mode: el.voiceModeSelect.value }),
+    await applySessionAction(ENDPOINTS.voiceMode, {
+      mode: el.voiceModeSelect.value,
     });
-    await refreshState();
   });
 
   el.audioTargetSelect.addEventListener("change", async () => {
-    await api("/api/audio/target", {
-      method: "POST",
-      body: JSON.stringify({ target: el.audioTargetSelect.value }),
+    await applySessionAction(ENDPOINTS.audioTarget, {
+      target: el.audioTargetSelect.value,
     });
-    await refreshState();
   });
 
   el.centerCamera.addEventListener("click", async () => {
-    el.panSlider.value = 0;
-    el.tiltSlider.value = 0;
+    el.panSlider.value = "0";
+    el.tiltSlider.value = "0";
+    syncRangeReadouts();
     await updateCamera();
   });
 
-  el.panSlider.addEventListener("change", updateCamera);
-  el.tiltSlider.addEventListener("change", updateCamera);
+  el.panSlider.addEventListener("input", syncRangeReadouts);
+  el.tiltSlider.addEventListener("input", syncRangeReadouts);
+  el.panSlider.addEventListener("change", () => {
+    updateCamera().catch((error) => setSpeechStatus(error.message, "danger"));
+  });
+  el.tiltSlider.addEventListener("change", () => {
+    updateCamera().catch((error) => setSpeechStatus(error.message, "danger"));
+  });
 
   el.stopButton.addEventListener("click", async () => {
-    await api("/api/emergency-stop", { method: "POST" });
-    await refreshState();
+    clearDriveLoop();
+    await applySessionAction(ENDPOINTS.emergencyStop);
   });
 
   el.clearEstop.addEventListener("click", async () => {
-    await api("/api/emergency-reset", { method: "POST" });
+    await applySessionAction(ENDPOINTS.emergencyReset);
+  });
+
+  el.refresh.addEventListener("click", async () => {
     await refreshState();
+    setSpeechStatus("State refreshed from the backend.", "ok");
   });
 
-  el.refresh.addEventListener("click", refreshState);
+  bindMomentaryPointerControl(el.pushToTalk, {
+    start: () => startTalking(),
+    stop: () => stopTalking(),
+  });
 
-  el.pushToTalk.addEventListener("mousedown", startTalking);
-  el.pushToTalk.addEventListener("mouseup", stopTalking);
-  el.pushToTalk.addEventListener("mouseleave", () => {
-    if (state.captureActive) {
-      stopTalking();
-    }
-  });
-  el.pushToTalk.addEventListener("touchstart", (event) => {
-    event.preventDefault();
-    startTalking();
-  });
-  el.pushToTalk.addEventListener("touchend", (event) => {
-    event.preventDefault();
-    stopTalking();
+  el.promptChips.forEach((button) => {
+    button.addEventListener("click", () => {
+      const prompt = button.dataset.prompt ?? "";
+      el.visionQuestion.value = prompt;
+      submitVisionQuestion(prompt).catch(() => null);
+    });
   });
 
   el.visionForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     const question = el.visionQuestion.value.trim();
-    if (!question) {
-      return;
-    }
-    el.visionAnswer.textContent = "Thinking...";
-    try {
-      const response = await api("/api/vision/question", {
-        method: "POST",
-        body: JSON.stringify({ question }),
-      });
-      el.visionAnswer.textContent = response.answer;
-    } catch (error) {
-      el.visionAnswer.textContent = error.message;
-    }
+    await submitVisionQuestion(question);
   });
 
-  window.setInterval(refreshState, 2500);
+  window.setInterval(() => {
+    refreshState().catch(() => null);
+  }, CONFIG.refreshIntervalMs);
 }
 
 init().catch((error) => {
-  el.speechStatus.textContent = error.message;
+  setSpeechStatus(error.message, "danger");
 });

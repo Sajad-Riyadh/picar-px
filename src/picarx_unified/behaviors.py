@@ -24,6 +24,7 @@ class PersonGreeterBehavior:
         audio: AudioRouter,
         get_audio_state: Callable[[], tuple[VoiceMode, AudioTarget]],
         publish_browser_event: Callable[[dict], None],
+        on_camera_pose: Callable[[int, int], None],
         on_greet: Callable[[], None],
     ) -> None:
         self._config = config
@@ -34,6 +35,7 @@ class PersonGreeterBehavior:
         self._audio = audio
         self._get_audio_state = get_audio_state
         self._publish_browser_event = publish_browser_event
+        self._on_camera_pose = on_camera_pose
         self._on_greet = on_greet
         self._running = False
         self._thread: threading.Thread | None = None
@@ -81,7 +83,10 @@ class PersonGreeterBehavior:
         elif face_center_y > frame_center_y + self._config.tracking_deadband_px:
             tilt -= self._config.tracking_step_degrees
         safe = self._guard.sanitize_camera(CameraRequest(pan=pan, tilt=tilt))
+        if safe.pan == snapshot.pan and safe.tilt == snapshot.tilt:
+            return
         self._hardware.set_camera(safe.pan, safe.tilt)
+        self._on_camera_pose(safe.pan, safe.tilt)
 
     def _greet(self) -> None:
         mode, target = self._get_audio_state()

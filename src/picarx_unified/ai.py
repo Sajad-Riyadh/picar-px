@@ -44,6 +44,14 @@ class AIService:
     def provider_name(self) -> str:
         return "openai" if self._client is not None else "rule-based"
 
+    @staticmethod
+    def _response_text(response) -> str | None:
+        text = getattr(response, "output_text", None)
+        if not isinstance(text, str):
+            return None
+        stripped = text.strip()
+        return stripped or None
+
     def generate_reply(self, transcript: str, vision_summary: str) -> str:
         transcript = transcript.strip()
         if not transcript:
@@ -83,8 +91,7 @@ class AIService:
                 ],
                 max_output_tokens=180,
             )
-            text = getattr(response, "output_text", None)
-            return text.strip() if text else self._fallback_reply(transcript, vision_summary)
+            return self._response_text(response) or self._fallback_reply(transcript, vision_summary)
         except Exception:
             return self._fallback_reply(transcript, vision_summary)
 
@@ -127,8 +134,7 @@ class AIService:
                 ],
                 max_output_tokens=220,
             )
-            text = getattr(response, "output_text", None)
-            return text.strip() if text else self._fallback_vision_answer(question, vision_summary)
+            return self._response_text(response) or self._fallback_vision_answer(question, vision_summary)
         except Exception:
             return self._fallback_vision_answer(question, vision_summary)
 
@@ -160,6 +166,9 @@ class AIService:
                     pass
 
     def synthesize(self, text: str) -> bytes:
+        text = text.strip()
+        if not text:
+            return silent_wav()
         command = shutil.which("espeak-ng") or shutil.which("espeak")
         if command is None:
             return silent_wav()

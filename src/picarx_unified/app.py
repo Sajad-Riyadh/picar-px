@@ -31,6 +31,10 @@ def _get_runtime(request: Request) -> RobotRuntime:
     return request.app.state.runtime
 
 
+def _is_static_path_allowed(static_root, target) -> bool:
+    return static_root == target or static_root in target.parents
+
+
 def create_app() -> FastAPI:
     config = AppConfig.from_env()
     runtime = RobotRuntime(config)
@@ -52,7 +56,7 @@ def create_app() -> FastAPI:
     async def static_file(path: str) -> FileResponse:
         static_root = config.static_dir.resolve()
         target = (config.static_dir / path).resolve()
-        if static_root != target and static_root not in target.parents:
+        if not _is_static_path_allowed(static_root, target):
             raise HTTPException(status_code=404, detail="Static asset not found.")
         if not target.exists():
             raise HTTPException(status_code=404, detail="Static asset not found.")
@@ -126,13 +130,13 @@ def create_app() -> FastAPI:
 
     @app.websocket("/ws/voice")
     async def voice_socket(websocket: WebSocket):
-        token = runtime.config.api_token
+        token = websocket.app.state.runtime.config.api_token
         if token:
             supplied = websocket.query_params.get("token", "")
             if supplied != token:
                 await websocket.close(code=4401)
                 return
-        connection = VoiceConnection(runtime, websocket)
+        connection = VoiceConnection(websocket.app.state.runtime, websocket)
         await connection.run()
 
     return app

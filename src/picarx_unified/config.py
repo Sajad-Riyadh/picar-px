@@ -35,6 +35,22 @@ def _env_float(name: str, default: float) -> float:
         return default
 
 
+def _env_text(name: str, default: str | None = None) -> str | None:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    stripped = value.strip()
+    return stripped or default
+
+
+def _env_path(name: str, default: Path) -> Path:
+    raw_value = os.getenv(name)
+    candidate = Path(raw_value).expanduser() if raw_value else default.expanduser()
+    if not candidate.is_absolute():
+        candidate = (PROJECT_ROOT / candidate).resolve()
+    return candidate
+
+
 @dataclass(slots=True)
 class AppConfig:
     host: str
@@ -48,6 +64,7 @@ class AppConfig:
     jpeg_quality: int
     voice_sample_rate: int
     voice_chunk_samples: int
+    voice_capture_max_seconds: float
     drive_max_speed: int
     steering_limit: int
     camera_pan_limit: int
@@ -68,10 +85,10 @@ class AppConfig:
 
     @classmethod
     def from_env(cls) -> "AppConfig":
-        state_dir = Path(os.getenv("PICARX_STATE_DIR", PROJECT_ROOT / "state")).expanduser()
-        static_dir = Path(os.getenv("PICARX_STATIC_DIR", Path(__file__).resolve().parent / "static")).expanduser()
+        state_dir = _env_path("PICARX_STATE_DIR", PROJECT_ROOT / "state")
+        static_dir = _env_path("PICARX_STATIC_DIR", Path(__file__).resolve().parent / "static")
         return cls(
-            host=os.getenv("PICARX_HOST", "0.0.0.0"),
+            host=_env_text("PICARX_HOST", "0.0.0.0") or "0.0.0.0",
             port=_env_int("PICARX_PORT", 8080),
             state_dir=state_dir,
             static_dir=static_dir,
@@ -82,6 +99,7 @@ class AppConfig:
             jpeg_quality=_env_int("PICARX_JPEG_QUALITY", 80),
             voice_sample_rate=_env_int("PICARX_VOICE_SAMPLE_RATE", 16000),
             voice_chunk_samples=_env_int("PICARX_VOICE_CHUNK_SAMPLES", 2048),
+            voice_capture_max_seconds=_env_float("PICARX_VOICE_CAPTURE_MAX_SECONDS", 20.0),
             drive_max_speed=_env_int("PICARX_MAX_SPEED", 50),
             steering_limit=_env_int("PICARX_STEERING_LIMIT", 30),
             camera_pan_limit=_env_int("PICARX_PAN_LIMIT", 70),
@@ -94,9 +112,9 @@ class AppConfig:
             tracking_deadband_px=_env_int("PICARX_TRACKING_DEADBAND_PX", 36),
             use_mock_hardware=_env_flag("PICARX_USE_MOCK", False),
             force_mock_camera=_env_flag("PICARX_FORCE_MOCK_CAMERA", False),
-            api_token=os.getenv("PICARX_API_TOKEN"),
-            openai_api_key=os.getenv("OPENAI_API_KEY"),
-            openai_text_model=os.getenv("OPENAI_TEXT_MODEL", "gpt-4.1-mini"),
-            openai_vision_model=os.getenv("OPENAI_VISION_MODEL", "gpt-4.1-mini"),
-            openai_stt_model=os.getenv("OPENAI_STT_MODEL", "gpt-4o-mini-transcribe"),
+            api_token=_env_text("PICARX_API_TOKEN"),
+            openai_api_key=_env_text("OPENAI_API_KEY"),
+            openai_text_model=_env_text("OPENAI_TEXT_MODEL", "gpt-4.1-mini") or "gpt-4.1-mini",
+            openai_vision_model=_env_text("OPENAI_VISION_MODEL", "gpt-4.1-mini") or "gpt-4.1-mini",
+            openai_stt_model=_env_text("OPENAI_STT_MODEL", "gpt-4o-mini-transcribe") or "gpt-4o-mini-transcribe",
         )
