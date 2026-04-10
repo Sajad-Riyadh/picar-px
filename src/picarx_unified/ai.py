@@ -1,18 +1,31 @@
 from __future__ import annotations
 
-import base64
+import asyncio
 import io
 import shutil
 import subprocess
-import tempfile
+import threading
 import wave
+from dataclasses import dataclass
+from typing import Awaitable, Callable, TypeVar
 
 from .config import AppConfig
 
 try:
-    from openai import OpenAI
+    from google import genai
+    from google.genai import types
 except Exception:  # pragma: no cover - optional during local development
-    OpenAI = None
+    genai = None
+    types = None
+
+
+_T = TypeVar("_T")
+
+
+@dataclass(slots=True)
+class _LiveTurnResult:
+    text: str | None = None
+    input_transcription: str | None = None
 
 
 def pcm16_to_wav(pcm_bytes: bytes, sample_rate: int) -> bytes:
@@ -34,23 +47,113 @@ class AIService:
     def __init__(self, config: AppConfig) -> None:
         self._config = config
         self._client = None
-        if OpenAI is not None and config.openai_api_key:
+        if genai is not None and config.gemini_api_key:
             try:
-                self._client = OpenAI(api_key=config.openai_api_key)
+                self._client = genai.Client(api_key=config.gemini_api_key)
             except Exception:
                 self._client = None
 
     @property
     def provider_name(self) -> str:
-        return "openai" if self._client is not None else "rule-based"
+        return "gemini-live" if self._client is not None else "rule-based"
 
     @staticmethod
-    def _response_text(response) -> str | None:
-        text = getattr(response, "output_text", None)
+    def _clean_text(text: str | None) -> str | None:
         if not isinstance(text, str):
             return None
         stripped = text.strip()
         return stripped or None
+
+    def _run_async(self, factory: Callable[[], Awaitable[_T]]) -> _T:
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.run(factory())
+
+        result: dict[str, _T] = {}
+        error: dict[str, BaseException] = {}
+
+        def runner() -> None:
+            try:
+                result["value"] = asyncio.run(factory())
+            except BaseException as exc:
+                error["value"] = exc
+
+        thread = threading.Thread(target=runner, name="gemini-live-call", daemon=True)
+        thread.start()
+        thread.join()
+        if "value" in error:
+            raise error["value"]
+        return result["value"]
+
+    async def _live_text_turn(
+        self,
+        *,
+        system_instruction: str,
+        parts: list,
+        max_output_tokens: int,
+    ) -> _LiveTurnResult:
+        assert self._client is not None
+        assert types is not None
+        config = types.LiveConnectConfig(
+            response_modalities=["TEXT"],
+            max_output_tokens=max_output_tokens,
+            system_instruction=system_instruction,
+            thinking_config=types.ThinkingConfig(thinking_level="minimal"),
+        )
+        async with self._client.aio.live.connect(
+            model=self._config.gemini_live_model,
+            config=config,
+        ) as session:
+            await session.send_client_content(
+                turns=types.Content(role="user", parts=parts),
+                turn_complete=True,
+            )
+            chunks: list[str] = []
+            async for message in session.receive():
+                chunk = self._clean_text(message.text)
+                if chunk:
+                    chunks.append(chunk)
+        return _LiveTurnResult(text=self._clean_text("".join(chunks)))
+
+    async def _live_transcription_turn(self, pcm_bytes: bytes, sample_rate: int) -> _LiveTurnResult:
+        assert self._client is not None
+        assert types is not None
+        config = types.LiveConnectConfig(
+            response_modalities=["TEXT"],
+            max_output_tokens=120,
+            system_instruction=(
+                "Transcribe the user's speech verbatim in plain text. "
+                "Return only the transcript and do not answer the user."
+            ),
+            input_audio_transcription=types.AudioTranscriptionConfig(),
+            thinking_config=types.ThinkingConfig(thinking_level="minimal"),
+        )
+        audio = types.Blob(
+            data=pcm_bytes,
+            mime_type=f"audio/pcm;rate={sample_rate}",
+        )
+        async with self._client.aio.live.connect(
+            model=self._config.gemini_live_model,
+            config=config,
+        ) as session:
+            await session.send_realtime_input(audio=audio)
+            await session.send_realtime_input(audio_stream_end=True)
+            chunks: list[str] = []
+            transcript: str | None = None
+            async for message in session.receive():
+                chunk = self._clean_text(message.text)
+                if chunk:
+                    chunks.append(chunk)
+                server_content = getattr(message, "server_content", None)
+                input_transcription = getattr(server_content, "input_transcription", None)
+                transcription_text = self._clean_text(getattr(input_transcription, "text", None))
+                if transcription_text:
+                    transcript = transcription_text
+        return _LiveTurnResult(
+            text=self._clean_text("".join(chunks)),
+            input_transcription=transcript,
+        )
 
     def generate_reply(self, transcript: str, vision_summary: str) -> str:
         transcript = transcript.strip()
@@ -59,39 +162,26 @@ class AIService:
         if self._client is None:
             return self._fallback_reply(transcript, vision_summary)
         try:
-            response = self._client.responses.create(
-                model=self._config.openai_text_model,
-                input=[
-                    {
-                        "role": "system",
-                        "content": [
-                            {
-                                "type": "input_text",
-                                "text": (
-                                    "You are a PiCar-X robot running on a Raspberry Pi 5. "
-                                    "You may answer questions, describe the camera scene, and greet people, "
-                                    "but you must never claim to directly control the motors."
-                                ),
-                            }
-                        ],
-                    },
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "input_text",
-                                "text": (
-                                    f"Camera summary: {vision_summary}\n"
-                                    f"User transcript: {transcript}\n"
-                                    "Reply in 1-3 short sentences."
-                                ),
-                            }
-                        ],
-                    },
-                ],
-                max_output_tokens=180,
+            response = self._run_async(
+                lambda: self._live_text_turn(
+                    system_instruction=(
+                        "You are a PiCar-X robot running on a Raspberry Pi 5. "
+                        "You may answer questions, describe the camera scene, and greet people, "
+                        "but you must never claim to directly control the motors."
+                    ),
+                    parts=[
+                        types.Part(
+                            text=(
+                                f"Camera summary: {vision_summary}\n"
+                                f"User transcript: {transcript}\n"
+                                "Reply in 1-3 short sentences."
+                            )
+                        )
+                    ],
+                    max_output_tokens=180,
+                )
             )
-            return self._response_text(response) or self._fallback_reply(transcript, vision_summary)
+            return response.text or self._fallback_reply(transcript, vision_summary)
         except Exception:
             return self._fallback_reply(transcript, vision_summary)
 
@@ -99,71 +189,73 @@ class AIService:
         if self._client is None or not frame_jpeg:
             return self._fallback_vision_answer(question, vision_summary)
         try:
-            image_b64 = base64.b64encode(frame_jpeg).decode("ascii")
-            response = self._client.responses.create(
-                model=self._config.openai_vision_model,
-                input=[
-                    {
-                        "role": "system",
-                        "content": [
-                            {
-                                "type": "input_text",
-                                "text": (
-                                    "Answer questions about the robot camera view. "
-                                    "Do not invent motor actions or unseen objects."
-                                ),
-                            }
-                        ],
-                    },
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "input_text",
-                                "text": (
-                                    f"Current local detection summary: {vision_summary}\n"
-                                    f"Question: {question}"
-                                ),
-                            },
-                            {
-                                "type": "input_image",
-                                "image_url": f"data:image/jpeg;base64,{image_b64}",
-                            },
-                        ],
-                    },
-                ],
-                max_output_tokens=220,
+            response = self._run_async(
+                lambda: self._live_text_turn(
+                    system_instruction=(
+                        "Answer questions about the robot camera view. "
+                        "Do not invent motor actions or unseen objects."
+                    ),
+                    parts=[
+                        types.Part(
+                            text=(
+                                f"Current local detection summary: {vision_summary}\n"
+                                f"Question: {question}"
+                            )
+                        ),
+                        types.Part(
+                            inline_data=types.Blob(
+                                data=frame_jpeg,
+                                mime_type="image/jpeg",
+                            )
+                        ),
+                    ],
+                    max_output_tokens=220,
+                )
             )
-            return self._response_text(response) or self._fallback_vision_answer(question, vision_summary)
+            return response.text or self._fallback_vision_answer(question, vision_summary)
         except Exception:
             return self._fallback_vision_answer(question, vision_summary)
+
+    def generate_detection_greeting(self, greeting_text: str, vision_summary: str) -> str:
+        greeting_text = greeting_text.strip()
+        if not greeting_text:
+            greeting_text = "Hello there. Welcome."
+        if self._client is None:
+            return greeting_text
+        try:
+            response = self._run_async(
+                lambda: self._live_text_turn(
+                    system_instruction=(
+                        "You are the voice of a PiCar-X robot greeting a person who just appeared "
+                        "in front of the camera. Keep the reply warm, short, and safe. "
+                        "Do not mention driving or claim motor control."
+                    ),
+                    parts=[
+                        types.Part(
+                            text=(
+                                f"Preferred greeting phrase: {greeting_text}\n"
+                                f"Current camera summary: {vision_summary}\n"
+                                "Speak in 1-2 short sentences and invite the person to talk."
+                            )
+                        )
+                    ],
+                    max_output_tokens=120,
+                )
+            )
+            return response.text or greeting_text
+        except Exception:
+            return greeting_text
 
     def transcribe_pcm(self, pcm_bytes: bytes, sample_rate: int) -> str | None:
         if self._client is None or not pcm_bytes:
             return None
-        wav_bytes = pcm16_to_wav(pcm_bytes, sample_rate)
-        temp_path = None
         try:
-            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as handle:
-                handle.write(wav_bytes)
-                temp_path = handle.name
-            with open(temp_path, "rb") as audio_file:
-                transcript = self._client.audio.transcriptions.create(
-                    model=self._config.openai_stt_model,
-                    file=audio_file,
-                )
-            text = getattr(transcript, "text", None)
-            return text.strip() if text else None
+            response = self._run_async(
+                lambda: self._live_transcription_turn(pcm_bytes, sample_rate)
+            )
+            return response.input_transcription or response.text
         except Exception:
             return None
-        finally:
-            if temp_path:
-                try:
-                    import os
-
-                    os.unlink(temp_path)
-                except OSError:
-                    pass
 
     def synthesize(self, text: str) -> bytes:
         text = text.strip()

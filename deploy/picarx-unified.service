@@ -8,7 +8,7 @@ Type=simple
 WorkingDirectory=/opt/picarx-unified
 Environment=PICARX_HOST=0.0.0.0
 Environment=PICARX_PORT=8080
-ExecStart=/opt/picarx-unified/.venv/bin/python -m picarx_unified
+ExecStart=/bin/bash /opt/picarx-unified/scripts/install_pi.sh --run-only
 Restart=on-failure
 RestartSec=3
 User=root

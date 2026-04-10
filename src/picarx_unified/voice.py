@@ -130,7 +130,7 @@ class VoiceConnection:
         if not transcript:
             await self._send_error(
                 "No transcript was available. Use a browser with Web Speech API support "
-                "or configure OPENAI_API_KEY for server-side transcription."
+                "or configure GEMINI_API_KEY for server-side transcription."
             )
             return
         try:

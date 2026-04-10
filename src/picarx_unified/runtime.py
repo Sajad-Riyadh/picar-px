@@ -11,7 +11,7 @@ from .behaviors import PersonGreeterBehavior
 from .config import AppConfig
 from .hardware.camera import CameraService
 from .hardware.picarx_adapter import PicarxAdapter
-from .models import AudioTarget, CameraRequest, CameraState, DriveRequest, DriveState, HealthResponse, RobotSession, VoiceMode, utc_now
+from .models import AudioTarget, CameraRequest, CameraState, DriveRequest, DriveState, HealthResponse, RobotSession, SettingsState, SettingsUpdateRequest, VoiceMode, utc_now
 from .safety import SafetyGuard
 from .state import StateStore
 from .vision import VisionService
@@ -41,6 +41,7 @@ class RobotRuntime:
             ai=self.ai,
             audio=self.audio,
             get_audio_state=self.get_audio_state,
+            get_settings=self.get_settings,
             publish_browser_event=self.publish_browser_event,
             on_camera_pose=self.record_camera_pose,
             on_greet=self._record_greeting,
@@ -52,7 +53,7 @@ class RobotRuntime:
         self._loop = loop
         self._running = True
         self.hardware.reset_pose()
-        self.store.update(self._refresh_session_metadata)
+        self.store.update(self._initialize_runtime_state)
         self.camera.start()
         self.vision.start()
         self.behaviors.start()
@@ -74,6 +75,7 @@ class RobotRuntime:
         session = self.store.load()
         self._sync_session_hardware_state(session)
         session.vision = self.vision.get_snapshot()
+        session.person_detected = bool(session.vision.detections)
         session.ai_provider = self.ai.provider_name
         session.browser_connected = self.browser_client_count > 0
         session.updated_at = utc_now()
@@ -97,12 +99,22 @@ class RobotRuntime:
         session = self.store.load()
         return session.voice_mode, session.audio_target
 
+    def get_settings(self) -> SettingsState:
+        return self.store.load().settings
+
     def set_voice_mode(self, mode: VoiceMode) -> RobotSession:
         self.store.update(lambda state: setattr(state, "voice_mode", mode))
         return self._publish_state()
 
     def set_audio_target(self, target: AudioTarget) -> RobotSession:
         self.store.update(lambda state: setattr(state, "audio_target", target))
+        return self._publish_state()
+
+    def update_settings(self, request: SettingsUpdateRequest) -> RobotSession:
+        def mutate(state: RobotSession) -> None:
+            state.settings = SettingsState(**request.model_dump())
+
+        self.store.update(mutate)
         return self._publish_state()
 
     def record_error(self, message: str | None) -> RobotSession:
@@ -222,8 +234,13 @@ class RobotRuntime:
             except Exception:
                 pass
 
-    def _record_greeting(self) -> None:
-        self.store.update(lambda state: setattr(state, "last_greeting_at", utc_now()))
+    def _record_greeting(self, greeting_text: str, action: str) -> None:
+        def mutate(state: RobotSession) -> None:
+            state.last_greeting_at = utc_now()
+            state.last_greeting_text = greeting_text or None
+            state.last_behavior_action = action
+
+        self.store.update(mutate)
         self._publish_state()
 
     def _watchdog_loop(self) -> None:
@@ -234,10 +251,16 @@ class RobotRuntime:
                     self.stop_drive(error="Drive watchdog timeout triggered.")
             time.sleep(0.2)
 
+    def _initialize_runtime_state(self, state: RobotSession) -> None:
+        state.voice_mode = state.settings.startup_voice_mode
+        state.audio_target = state.settings.startup_audio_target
+        self._refresh_session_metadata(state)
+
     def _refresh_session_metadata(self, state: RobotSession) -> None:
         self._sync_session_hardware_state(state)
         state.ai_provider = self.ai.provider_name
         state.browser_connected = self.browser_client_count > 0
+        state.person_detected = False
         state.last_error = None
 
     def _publish_state(self) -> RobotSession:

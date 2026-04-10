@@ -8,186 +8,210 @@
   </head>
   <body>
     <main class="shell">
-      <section class="hero panel panel-hero">
+      <section class="hero panel">
         <div class="hero-copy">
-          <p class="eyebrow">PiCar-X Unified Console</p>
-          <h1>Mission control for driving, optics, voice relay, and scene awareness.</h1>
+          <p class="eyebrow">SunFounder PiCar-X</p>
+          <h1>Unified browser cockpit for drive, camera, voice, and live robot status.</h1>
           <p class="subtitle">
-            A polished command surface for the SunFounder PiCar-X with guarded motion,
-            live camera streaming, AI-assisted voice, and person-aware scene tracking.
+            Safety-guarded control for Raspberry Pi 5 with live video, browser voice relay,
+            Gemini-backed replies, and configurable person-follow greeting behavior.
           </p>
-          <div class="hero-metrics">
-            <div class="hero-metric">
-              <span>Session Sync</span>
-              <strong id="session-updated-label">Syncing...</strong>
-            </div>
-            <div class="hero-metric">
-              <span>Drive Vector</span>
-              <strong id="drive-state-label">0 spd / 0 str</strong>
-            </div>
-            <div class="hero-metric">
-              <span>Camera Pose</span>
-              <strong id="camera-state-label">P 0deg / T 0deg</strong>
-            </div>
-          </div>
         </div>
 
         <div class="status-grid">
-          <div class="status-card" data-tone="neutral">
-            <span>Voice Profile</span>
-            <strong id="voice-mode-label">Mute</strong>
-            <small>Speech operating mode</small>
-          </div>
-          <div class="status-card" data-tone="cool">
-            <span>Audio Route</span>
-            <strong id="audio-target-label">Car</strong>
-            <small>Playback destination</small>
-          </div>
-          <div class="status-card" data-tone="neutral">
-            <span>Hardware Stack</span>
-            <strong id="hardware-label">Loading</strong>
-            <small>Motor and camera backends</small>
-          </div>
-          <div class="status-card" data-tone="ok">
-            <span>Emergency Loop</span>
+          <article class="status-card" data-tone="neutral">
+            <span>Updated</span>
+            <strong id="session-updated-label">Syncing...</strong>
+          </article>
+          <article class="status-card" data-tone="neutral">
+            <span>Drive</span>
+            <strong id="drive-state-label">0 spd / 0 str</strong>
+          </article>
+          <article class="status-card" data-tone="neutral">
+            <span>Camera</span>
+            <strong id="camera-state-label">P 0deg / T 0deg</strong>
+          </article>
+          <article class="status-card" data-tone="ok">
+            <span>Safety</span>
             <strong id="estop-label">Clear</strong>
-            <small>Safety interlock state</small>
-          </div>
+          </article>
+          <article class="status-card" data-tone="cool">
+            <span>Voice Mode</span>
+            <strong id="voice-mode-label">Mute</strong>
+          </article>
+          <article class="status-card" data-tone="cool">
+            <span>Audio Target</span>
+            <strong id="audio-target-label">Car</strong>
+          </article>
+          <article class="status-card" data-tone="neutral">
+            <span>Hardware</span>
+            <strong id="hardware-label">Loading</strong>
+          </article>
+          <article class="status-card" data-tone="neutral">
+            <span>System</span>
+            <strong id="system-status-label">Connecting</strong>
+          </article>
         </div>
       </section>
 
-      <section class="telemetry-strip">
-        <article class="telemetry-card" data-tone="neutral">
-          <span>Motion Posture</span>
-          <strong id="drive-summary-label">Stopped</strong>
-          <small>Manual drive command path</small>
-        </article>
-        <article class="telemetry-card" data-tone="neutral">
-          <span>Camera Alignment</span>
-          <strong id="camera-summary-label">Centered</strong>
-          <small>Pan and tilt reference</small>
-        </article>
-        <article class="telemetry-card" data-tone="cool">
-          <span>Vision Refresh</span>
-          <strong id="vision-updated-label">Pending</strong>
-          <small>Most recent analyzed frame</small>
-        </article>
-        <article class="telemetry-card" data-tone="ok">
-          <span>System State</span>
-          <strong id="system-status-label">Connecting</strong>
-          <small>Browser and backend coordination</small>
-        </article>
-      </section>
+      <nav class="tab-strip panel" aria-label="Control sections">
+        <button type="button" class="tab-button" data-tab-button="drive">Drive</button>
+        <button type="button" class="tab-button" data-tab-button="camera">Camera</button>
+        <button type="button" class="tab-button" data-tab-button="voice">Voice</button>
+        <button type="button" class="tab-button" data-tab-button="ai">AI / Vision</button>
+        <button type="button" class="tab-button" data-tab-button="settings">Settings</button>
+      </nav>
 
-      <section class="dashboard">
-        <article class="panel video-panel">
-          <div class="panel-header">
-            <div>
-              <p class="section-kicker">Live Optics</p>
-              <h2>Camera and Tracking</h2>
-            </div>
-            <button id="center-camera-btn" class="secondary">Center Camera</button>
-          </div>
-
-          <div class="video-frame">
-            <img id="video-stream" src="/stream.mjpg" alt="PiCar-X live stream" />
-            <div class="video-overlay">
-              <span class="overlay-chip">Live Stream</span>
-              <p id="vision-summary" class="overlay-summary">Waiting for camera summary...</p>
-            </div>
-          </div>
-
-          <div class="sliders range-grid">
-            <label class="range-field">
-              <div class="field-head">
-                <span>Pan</span>
-                <strong id="pan-value">0deg</strong>
-              </div>
-              <input id="pan-slider" type="range" min="-70" max="70" value="0" />
-            </label>
-            <label class="range-field">
-              <div class="field-head">
-                <span>Tilt</span>
-                <strong id="tilt-value">0deg</strong>
-              </div>
-              <input id="tilt-slider" type="range" min="-35" max="35" value="0" />
-            </label>
-          </div>
-        </article>
-
-        <article class="panel control-panel">
+      <section class="tab-panels">
+        <section id="tab-drive" class="tab-panel panel">
           <div class="panel-header">
             <div>
               <p class="section-kicker">Manual Motion</p>
-              <h2>Drive Controls</h2>
+              <h2>Drive Control</h2>
             </div>
-            <button id="stop-btn" class="danger">Emergency Stop</button>
-          </div>
-
-          <div class="drive-pad">
-            <button class="drive drive-forward" data-speed="35" data-steering="0" aria-pressed="false">
-              <span class="drive-arrow">&uarr;</span>
-              <span>Forward</span>
-            </button>
-            <button class="drive drive-left" data-speed="25" data-steering="-25" aria-pressed="false">
-              <span class="drive-arrow">&larr;</span>
-              <span>Left</span>
-            </button>
-            <button class="drive drive-stop neutral" data-speed="0" data-steering="0" aria-pressed="false">
-              <span class="drive-arrow">&middot;</span>
-              <span>Stop</span>
-            </button>
-            <button class="drive drive-right" data-speed="25" data-steering="25" aria-pressed="false">
-              <span class="drive-arrow">&rarr;</span>
-              <span>Right</span>
-            </button>
-            <button class="drive drive-reverse" data-speed="-25" data-steering="0" aria-pressed="false">
-              <span class="drive-arrow">&darr;</span>
-              <span>Reverse</span>
-            </button>
-          </div>
-
-          <div class="drive-notes">
-            <div class="hint-card">
-              <span class="hint-label">Keyboard</span>
-              <div class="keycap-row">
-                <span class="keycap">W</span>
-                <span class="keycap">A</span>
-                <span class="keycap">S</span>
-                <span class="keycap">D</span>
-              </div>
-              <p>
-                Hold a drive control to keep the command alive. Releasing sends a stop,
-                and the backend watchdog catches stale motion automatically.
-              </p>
-            </div>
-
-            <div class="control-inline">
+            <div class="button-row">
+              <button id="stop-btn" class="danger">Emergency Stop</button>
               <button id="clear-estop-btn" class="secondary">Reset E-Stop</button>
+            </div>
+          </div>
+
+          <div class="drive-layout">
+            <div class="drive-pad">
+              <button class="drive drive-forward" data-speed-sign="1" data-steering="0">
+                <span class="drive-arrow">&uarr;</span>
+                <span>Forward</span>
+              </button>
+              <button class="drive drive-left" data-speed-sign="1" data-steering="-25">
+                <span class="drive-arrow">&larr;</span>
+                <span>Left</span>
+              </button>
+              <button class="drive drive-stop neutral" data-speed-sign="0" data-steering="0">
+                <span class="drive-arrow">&middot;</span>
+                <span>Stop</span>
+              </button>
+              <button class="drive drive-right" data-speed-sign="1" data-steering="25">
+                <span class="drive-arrow">&rarr;</span>
+                <span>Right</span>
+              </button>
+              <button class="drive drive-reverse" data-speed-sign="-1" data-steering="0">
+                <span class="drive-arrow">&darr;</span>
+                <span>Reverse</span>
+              </button>
+            </div>
+
+            <aside class="stack">
+              <label class="range-field">
+                <div class="field-head">
+                  <span>Drive Speed</span>
+                  <strong id="drive-speed-value">35%</strong>
+                </div>
+                <input id="drive-speed-slider" type="range" min="10" max="100" value="35" />
+              </label>
+
+              <article class="info-card">
+                <span>Keyboard Control</span>
+                <strong>W A S D</strong>
+                <p>
+                  Hold a button or key to keep the command alive. Releasing stops the command,
+                  and the backend watchdog still catches stale motion.
+                </p>
+              </article>
+
+              <article class="info-card">
+                <span>Motion Summary</span>
+                <strong id="drive-summary-label">Stopped</strong>
+                <p id="last-error-label">No active error.</p>
+              </article>
+            </aside>
+          </div>
+        </section>
+
+        <section id="tab-camera" class="tab-panel panel">
+          <div class="panel-header">
+            <div>
+              <p class="section-kicker">Optics and Tracking</p>
+              <h2>Camera Control</h2>
+            </div>
+            <div class="button-row">
+              <button id="center-camera-btn" class="secondary">Center Camera</button>
               <button id="refresh-btn" class="secondary">Refresh State</button>
             </div>
           </div>
-        </article>
 
-        <article class="panel voice-panel">
+          <div class="camera-layout">
+            <div class="video-frame">
+              <img id="video-stream" src="/stream.mjpg" alt="PiCar-X live camera stream" />
+              <div class="video-overlay">
+                <span class="overlay-chip">Live Stream</span>
+                <p id="vision-summary" class="overlay-summary">Waiting for camera summary...</p>
+              </div>
+            </div>
+
+            <div class="stack">
+              <div class="camera-pad">
+                <button id="camera-up-btn" class="secondary">Up</button>
+                <button id="camera-left-btn" class="secondary">Left</button>
+                <button id="camera-center-btn" class="secondary">Center</button>
+                <button id="camera-right-btn" class="secondary">Right</button>
+                <button id="camera-down-btn" class="secondary">Down</button>
+              </div>
+
+              <div class="preset-row">
+                <button type="button" class="preset-chip" data-pan="-45" data-tilt="0">Look Left</button>
+                <button type="button" class="preset-chip" data-pan="0" data-tilt="0">Home</button>
+                <button type="button" class="preset-chip" data-pan="45" data-tilt="0">Look Right</button>
+              </div>
+
+              <label class="toggle-field">
+                <input id="camera-follow-toggle" type="checkbox" />
+                <span>Follow detected person automatically</span>
+              </label>
+
+              <label class="range-field">
+                <div class="field-head">
+                  <span>Pan</span>
+                  <strong id="pan-value">0deg</strong>
+                </div>
+                <input id="pan-slider" type="range" min="-70" max="70" value="0" />
+              </label>
+
+              <label class="range-field">
+                <div class="field-head">
+                  <span>Tilt</span>
+                  <strong id="tilt-value">0deg</strong>
+                </div>
+                <input id="tilt-slider" type="range" min="-35" max="35" value="0" />
+              </label>
+
+              <article class="info-card">
+                <span>Tracking Step</span>
+                <strong id="camera-step-badge">5deg</strong>
+                <p>The manual move buttons and person-centering loop both use this safe step size.</p>
+              </article>
+            </div>
+          </div>
+        </section>
+
+        <section id="tab-voice" class="tab-panel panel">
           <div class="panel-header">
             <div>
-              <p class="section-kicker">Audio Operations</p>
-              <h2>Voice Relay and AI Reply</h2>
+              <p class="section-kicker">Speech and Routing</p>
+              <h2>Voice Modes</h2>
             </div>
           </div>
 
-          <div class="selectors">
+          <div class="two-col">
             <label>
-              <span>Mode</span>
+              <span>Voice Mode</span>
               <select id="voice-mode-select">
                 <option value="mute">Mute</option>
                 <option value="relay">Relay</option>
                 <option value="ai_reply">AI Reply</option>
               </select>
             </label>
+
             <label>
-              <span>Audio Target</span>
+              <span>Audio Output</span>
               <select id="audio-target-select">
                 <option value="car">Car speaker</option>
                 <option value="browser">Computer speaker</option>
@@ -198,7 +222,7 @@
 
           <button id="push-to-talk-btn" class="accent talk-button" aria-pressed="false">
             <span>Hold To Talk</span>
-            <small>Relay your mic live or capture a turn for an AI response.</small>
+            <small>Relay your mic live or capture a full AI turn from the browser.</small>
           </button>
 
           <p id="speech-status" class="status-banner" data-tone="neutral" aria-live="polite">
@@ -210,38 +234,131 @@
             <span id="message-count-label">0 entries</span>
           </div>
           <div id="messages" class="messages" aria-live="polite"></div>
-        </article>
+        </section>
 
-        <article class="panel vision-panel">
+        <section id="tab-ai" class="tab-panel panel">
           <div class="panel-header">
             <div>
               <p class="section-kicker">Scene Intelligence</p>
-              <h2>Ask About The Frame</h2>
+              <h2>AI / Vision</h2>
             </div>
           </div>
 
-          <form id="vision-form">
+          <div class="status-grid compact">
+            <article class="status-card" data-tone="neutral">
+              <span>Person Visible</span>
+              <strong id="person-detected-label">Unknown</strong>
+            </article>
+            <article class="status-card" data-tone="cool">
+              <span>Vision Updated</span>
+              <strong id="vision-updated-label">Pending</strong>
+            </article>
+            <article class="status-card" data-tone="cool">
+              <span>AI Provider</span>
+              <strong id="ai-provider-label">Loading</strong>
+            </article>
+            <article class="status-card" data-tone="neutral">
+              <span>Behavior</span>
+              <strong id="last-behavior-label">No behavior event yet</strong>
+            </article>
+          </div>
+
+          <article class="info-card wide">
+            <span>Last Greeting</span>
+            <strong id="last-greeting-label">No greeting delivered yet.</strong>
+          </article>
+
+          <form id="vision-form" class="stack">
             <label>
-              <span>Question</span>
+              <span>Ask About The Camera View</span>
               <input id="vision-question" type="text" placeholder="What do you see right now?" />
             </label>
             <button type="submit" class="accent">Ask Vision</button>
           </form>
 
           <div class="quick-prompts">
-            <button type="button" class="prompt-chip" data-prompt="Where is the detected face in the frame?">
-              Locate face
-            </button>
-            <button type="button" class="prompt-chip" data-prompt="Describe the scene in one short paragraph.">
-              Summarize scene
-            </button>
-            <button type="button" class="prompt-chip" data-prompt="Is there anyone visible right now?">
-              Check for person
-            </button>
+            <button type="button" class="prompt-chip" data-prompt="What do you see right now?">Scene</button>
+            <button type="button" class="prompt-chip" data-prompt="Is there a person in front of the camera?">Person</button>
+            <button type="button" class="prompt-chip" data-prompt="Where is the detected face in the frame?">Locate Face</button>
           </div>
 
           <pre id="vision-answer" class="answer-box">No answer yet.</pre>
-        </article>
+        </section>
+
+        <section id="tab-settings" class="tab-panel panel">
+          <div class="panel-header">
+            <div>
+              <p class="section-kicker">Robot Preferences</p>
+              <h2>Settings</h2>
+            </div>
+          </div>
+
+          <form id="settings-form" class="settings-grid">
+            <label class="full-row">
+              <span>Editable Greeting Text</span>
+              <input id="greeting-text-input" type="text" maxlength="160" />
+            </label>
+
+            <label class="toggle-field">
+              <input id="greeting-enabled-input" type="checkbox" />
+              <span>Enable automatic greeting when a person is detected</span>
+            </label>
+
+            <label class="toggle-field">
+              <input id="auto-tracking-input" type="checkbox" />
+              <span>Enable automatic camera turn-toward-person tracking</span>
+            </label>
+
+            <label>
+              <span>Person Detection Response</span>
+              <select id="greeting-mode-select">
+                <option value="simple_greeting">Simple greeting only</option>
+                <option value="ai_live_greeting">Start AI live greeting</option>
+                <option value="detect_only">Detection only, no speech</option>
+              </select>
+            </label>
+
+            <label>
+              <span>Startup Voice Mode</span>
+              <select id="startup-voice-mode-select">
+                <option value="mute">Mute</option>
+                <option value="relay">Relay</option>
+                <option value="ai_reply">AI Reply</option>
+              </select>
+            </label>
+
+            <label>
+              <span>Startup Audio Target</span>
+              <select id="startup-audio-target-select">
+                <option value="car">Car speaker</option>
+                <option value="browser">Computer speaker</option>
+                <option value="both">Both</option>
+              </select>
+            </label>
+
+            <label>
+              <div class="field-head">
+                <span>Camera Step / Tracking Sensitivity</span>
+                <strong id="camera-step-value">5deg</strong>
+              </div>
+              <input id="camera-step-input" type="range" min="1" max="20" value="5" />
+            </label>
+
+            <article class="info-card">
+              <span>Safety Notes</span>
+              <strong>Motor safety stays enforced</strong>
+              <p>
+                Emergency stop, steering limits, camera limits, and ultrasonic forward-motion blocking
+                remain active regardless of AI or greeting settings.
+              </p>
+            </article>
+
+            <div class="full-row button-row">
+              <button id="save-settings-btn" type="submit" class="accent">Save Settings</button>
+              <p id="settings-save-status" class="status-banner" data-tone="neutral">Settings not modified yet.</p>
+            </div>
+          </form>
+        </section>
       </section>
     </main>
 

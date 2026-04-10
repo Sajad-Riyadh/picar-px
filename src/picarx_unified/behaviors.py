@@ -8,7 +8,7 @@ from .ai import AIService
 from .audio import AudioRouter
 from .config import AppConfig
 from .hardware.picarx_adapter import PicarxAdapter
-from .models import AudioTarget, CameraRequest, Detection, VoiceMode
+from .models import AudioTarget, CameraRequest, Detection, GreetingMode, SettingsState, VoiceMode
 from .safety import SafetyGuard
 from .vision import VisionService
 
@@ -23,9 +23,10 @@ class PersonGreeterBehavior:
         ai: AIService,
         audio: AudioRouter,
         get_audio_state: Callable[[], tuple[VoiceMode, AudioTarget]],
+        get_settings: Callable[[], SettingsState],
         publish_browser_event: Callable[[dict], None],
         on_camera_pose: Callable[[int, int], None],
-        on_greet: Callable[[], None],
+        on_greet: Callable[[str, str], None],
     ) -> None:
         self._config = config
         self._hardware = hardware
@@ -34,6 +35,7 @@ class PersonGreeterBehavior:
         self._ai = ai
         self._audio = audio
         self._get_audio_state = get_audio_state
+        self._get_settings = get_settings
         self._publish_browser_event = publish_browser_event
         self._on_camera_pose = on_camera_pose
         self._on_greet = on_greet
@@ -57,14 +59,30 @@ class PersonGreeterBehavior:
         while self._running:
             snapshot = self._vision.get_snapshot()
             primary = snapshot.detections[0] if snapshot.detections else None
+            settings = self._get_settings()
             if primary is not None:
-                self._track_face(primary, snapshot.frame_width, snapshot.frame_height)
-                if time.monotonic() - self._last_greet_monotonic >= self._config.greet_cooldown_seconds:
-                    self._greet()
+                if settings.auto_tracking_enabled:
+                    self._track_face(
+                        primary,
+                        snapshot.frame_width,
+                        snapshot.frame_height,
+                        settings.camera_step_degrees,
+                    )
+                if (
+                    settings.greeting_enabled
+                    and time.monotonic() - self._last_greet_monotonic >= self._config.greet_cooldown_seconds
+                ):
+                    self._greet(settings, snapshot.summary)
                     self._last_greet_monotonic = time.monotonic()
             time.sleep(0.35)
 
-    def _track_face(self, detection: Detection, frame_width: int, frame_height: int) -> None:
+    def _track_face(
+        self,
+        detection: Detection,
+        frame_width: int,
+        frame_height: int,
+        step_degrees: int,
+    ) -> None:
         if frame_width <= 0 or frame_height <= 0:
             return
         snapshot = self._hardware.snapshot()
@@ -75,24 +93,29 @@ class PersonGreeterBehavior:
         pan = snapshot.pan
         tilt = snapshot.tilt
         if face_center_x < frame_center_x - self._config.tracking_deadband_px:
-            pan -= self._config.tracking_step_degrees
+            pan -= step_degrees
         elif face_center_x > frame_center_x + self._config.tracking_deadband_px:
-            pan += self._config.tracking_step_degrees
+            pan += step_degrees
         if face_center_y < frame_center_y - self._config.tracking_deadband_px:
-            tilt += self._config.tracking_step_degrees
+            tilt += step_degrees
         elif face_center_y > frame_center_y + self._config.tracking_deadband_px:
-            tilt -= self._config.tracking_step_degrees
+            tilt -= step_degrees
         safe = self._guard.sanitize_camera(CameraRequest(pan=pan, tilt=tilt))
         if safe.pan == snapshot.pan and safe.tilt == snapshot.tilt:
             return
         self._hardware.set_camera(safe.pan, safe.tilt)
         self._on_camera_pose(safe.pan, safe.tilt)
 
-    def _greet(self) -> None:
-        mode, target = self._get_audio_state()
-        if mode == VoiceMode.MUTE:
+    def _greet(self, settings: SettingsState, vision_summary: str) -> None:
+        _, target = self._get_audio_state()
+        if settings.greeting_mode == GreetingMode.DETECT_ONLY:
+            self._on_greet("", "Detection-only mode triggered.")
             return
-        greeting = "Hello there. I can see someone in front of me."
+        greeting = settings.greeting_text
+        action = "Simple greeting delivered."
+        if settings.greeting_mode == GreetingMode.AI_LIVE:
+            greeting = self._ai.generate_detection_greeting(settings.greeting_text, vision_summary)
+            action = "AI live greeting delivered."
         wav_bytes = self._ai.synthesize(greeting)
         self._audio.route_assistant_audio(
             wav_bytes,
@@ -100,4 +123,4 @@ class PersonGreeterBehavior:
             self._publish_browser_event,
             text=greeting,
         )
-        self._on_greet()
+        self._on_greet(greeting, action)

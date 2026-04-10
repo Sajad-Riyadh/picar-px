@@ -78,10 +78,8 @@ class AppConfig:
     use_mock_hardware: bool
     force_mock_camera: bool
     api_token: str | None
-    openai_api_key: str | None
-    openai_text_model: str
-    openai_vision_model: str
-    openai_stt_model: str
+    gemini_api_key: str | None
+    gemini_live_model: str
 
     @classmethod
     def from_env(cls) -> "AppConfig":
@@ -113,8 +111,7 @@ class AppConfig:
             use_mock_hardware=_env_flag("PICARX_USE_MOCK", False),
             force_mock_camera=_env_flag("PICARX_FORCE_MOCK_CAMERA", False),
             api_token=_env_text("PICARX_API_TOKEN"),
-            openai_api_key=_env_text("OPENAI_API_KEY"),
-            openai_text_model=_env_text("OPENAI_TEXT_MODEL", "gpt-4.1-mini") or "gpt-4.1-mini",
-            openai_vision_model=_env_text("OPENAI_VISION_MODEL", "gpt-4.1-mini") or "gpt-4.1-mini",
-            openai_stt_model=_env_text("OPENAI_STT_MODEL", "gpt-4o-mini-transcribe") or "gpt-4o-mini-transcribe",
+            gemini_api_key=_env_text("GEMINI_API_KEY"),
+            gemini_live_model=_env_text("GEMINI_LIVE_MODEL", "gemini-3.1-flash-live-preview")
+            or "gemini-3.1-flash-live-preview",
         )

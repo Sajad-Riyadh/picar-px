@@ -39,10 +39,8 @@ def make_config(state_dir: Path) -> AppConfig:
         use_mock_hardware=True,
         force_mock_camera=True,
         api_token=None,
-        openai_api_key=None,
-        openai_text_model="gpt-4.1-mini",
-        openai_vision_model="gpt-4.1-mini",
-        openai_stt_model="gpt-4o-mini-transcribe",
+        gemini_api_key=None,
+        gemini_live_model="gemini-3.1-flash-live-preview",
     )
 
 

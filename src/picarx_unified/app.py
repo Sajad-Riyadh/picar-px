@@ -8,7 +8,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request, WebSocket
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 from .config import AppConfig
-from .models import AudioTargetRequest, CameraRequest, DriveRequest, ModeRequest, VisionQuestionRequest
+from .models import AudioTargetRequest, CameraRequest, DriveRequest, ModeRequest, SettingsUpdateRequest, VisionQuestionRequest
 from .runtime import RobotRuntime
 from .safety import SafetyViolation
 from .voice import VoiceConnection
@@ -70,6 +70,10 @@ def create_app() -> FastAPI:
     async def state(request: Request):
         return _get_runtime(request).current_session()
 
+    @app.get("/api/settings")
+    async def settings(request: Request):
+        return _get_runtime(request).get_settings()
+
     @app.post("/api/drive")
     async def drive(
         request: Request,
@@ -98,6 +102,14 @@ def create_app() -> FastAPI:
     @app.post("/api/audio/target")
     async def audio_target(request: Request, body: AudioTargetRequest, _: None = Depends(_authorize)):
         return _get_runtime(request).set_audio_target(body.target)
+
+    @app.post("/api/settings")
+    async def update_settings(
+        request: Request,
+        body: SettingsUpdateRequest,
+        _: None = Depends(_authorize),
+    ):
+        return _get_runtime(request).update_settings(body)
 
     @app.post("/api/emergency-stop")
     async def emergency_stop(request: Request, _: None = Depends(_authorize)):

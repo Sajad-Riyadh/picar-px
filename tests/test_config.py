@@ -16,7 +16,7 @@ class AppConfigTests(unittest.TestCase):
                 "PICARX_STATE_DIR": "custom-state",
                 "PICARX_STATIC_DIR": "custom-static",
                 "PICARX_API_TOKEN": " secret-token ",
-                "OPENAI_API_KEY": " sk-test ",
+                "GEMINI_API_KEY": " gemini-test ",
                 "PICARX_VOICE_CAPTURE_MAX_SECONDS": "7.5",
             },
             clear=True,
@@ -27,7 +27,7 @@ class AppConfigTests(unittest.TestCase):
         self.assertEqual(config.state_dir, (PROJECT_ROOT / "custom-state").resolve())
         self.assertEqual(config.static_dir, (PROJECT_ROOT / "custom-static").resolve())
         self.assertEqual(config.api_token, "secret-token")
-        self.assertEqual(config.openai_api_key, "sk-test")
+        self.assertEqual(config.gemini_api_key, "gemini-test")
         self.assertEqual(config.voice_capture_max_seconds, 7.5)
 
 

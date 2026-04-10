@@ -130,7 +130,7 @@ The full first-version implementation is the checked-in code in this repository.
 - [`src/picarx_unified/behaviors.py`](src/picarx_unified/behaviors.py): person-aware camera tracking and greeting loop.
 - [`src/picarx_unified/audio.py`](src/picarx_unified/audio.py): car-speaker/browser-speaker routing.
 - [`src/picarx_unified/voice.py`](src/picarx_unified/voice.py): relay mode and AI reply mode browser voice handling.
-- [`src/picarx_unified/ai.py`](src/picarx_unified/ai.py): AI reply generation, optional OpenAI vision/STT, local `espeak` TTS fallback.
+- [`src/picarx_unified/ai.py`](src/picarx_unified/ai.py): AI reply generation, optional Gemini Live vision/STT, local `espeak` TTS fallback.
 - [`src/picarx_unified/static/index.html`](src/picarx_unified/static/index.html): browser dashboard.
 - [`src/picarx_unified/static/app.js`](src/picarx_unified/static/app.js): browser controls, push-to-talk, playback, state refresh.
 - [`src/picarx_unified/static/pcm-worklet.js`](src/picarx_unified/static/pcm-worklet.js): microphone PCM capture worklet.
@@ -155,8 +155,8 @@ The full first-version implementation is the checked-in code in this repository.
 - `pyproject.toml`: Python packaging and install metadata.
 - `requirements.txt`: direct dependency list.
 - `.env.example`: configurable runtime defaults and optional AI/API settings.
-- `scripts/install_pi.sh`: Raspberry Pi installation helper.
-- `scripts/run_pi.sh`: simple service-launch helper for SSH use.
+- `scripts/install_pi.sh`: one-file Raspberry Pi bootstrapper that installs dependencies, prepares `.env`, and can launch the app.
+- `scripts/run_pi.sh`: compatibility wrapper that forwards to `install_pi.sh --run-only`.
 - `deploy/picarx-unified.service`: `systemd` unit file for boot-time startup.
 - `src/picarx_unified/config.py`: central environment-backed configuration object.
 - `src/picarx_unified/models.py`: Pydantic request/response/session models.
@@ -165,7 +165,7 @@ The full first-version implementation is the checked-in code in this repository.
 - `src/picarx_unified/hardware/picarx_adapter.py`: official PiCar-X wrapper plus mock backend.
 - `src/picarx_unified/hardware/camera.py`: camera source abstraction with Picamera2, OpenCV, or mock fallback.
 - `src/picarx_unified/audio.py`: local speaker playback and browser audio event routing.
-- `src/picarx_unified/ai.py`: optional OpenAI-backed AI plus local rule-based fallback and `espeak` TTS.
+- `src/picarx_unified/ai.py`: optional Gemini Live-backed AI plus local rule-based fallback and `espeak` TTS.
 - `src/picarx_unified/vision.py`: face detection and natural-language scene summary.
 - `src/picarx_unified/behaviors.py`: autonomous but non-driving behavior loop for greeting/tracking.
 - `src/picarx_unified/runtime.py`: the main coordination layer that keeps modules decoupled.
@@ -179,69 +179,75 @@ The full first-version implementation is the checked-in code in this repository.
 
 ## 7. Installation and run steps
 
-### Required libraries
+### One-file install and run
 
-System packages on Raspberry Pi OS:
-
-```bash
-sudo apt update
-sudo apt install -y git python3 python3-venv python3-pip python3-opencv python3-picamera2 espeak-ng alsa-utils
-```
-
-Python packages for this project:
+The fastest Raspberry Pi setup is a single command:
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install --upgrade pip
-pip install -e .
+cd /path/to/Picar-px
+bash scripts/install_pi.sh
 ```
 
-Official SunFounder PiCar-X base stack:
+That one file will:
 
-- Follow the official SunFounder module installation guide:
-  [install_all_modules](https://docs.sunfounder.com/projects/picar-x-v20/en/latest/python/python_start/install_all_modules.html)
-- The official repo install command from SunFounder is:
+1. Install Raspberry Pi OS packages with `apt`
+2. Install the official SunFounder PiCar-X Python stack when needed
+3. Create or reuse `.venv`
+4. Install this project in editable mode
+5. Create `.env` from `.env.example` on first run
+6. Start the web app
+
+Open the dashboard at `http://<pi-ip-address>:8080/` when startup finishes.
+
+### Useful options
 
 ```bash
-git clone -b v2.0 https://github.com/SunFounder/picar-x.git /tmp/picar-x
-cd /tmp/picar-x
-sudo python3 setup.py install
+# install everything, but do not start the app
+bash scripts/install_pi.sh --install-only
+
+# start an already-installed setup
+bash scripts/install_pi.sh --run-only
+
+# force mock hardware and mock camera mode
+bash scripts/install_pi.sh --mock
+
+# override bind host and port for the current run
+bash scripts/install_pi.sh --run-only --host 0.0.0.0 --port 8080
 ```
+
+The script auto-loads `.env` if it exists, so optional settings such as `GEMINI_API_KEY` and `PICARX_API_TOKEN` can live there.
 
 ### Full install on Raspberry Pi 5
 
 ```bash
 cd /path/to/Picar-px
-chmod +x scripts/install_pi.sh scripts/run_pi.sh
-./scripts/install_pi.sh
+bash scripts/install_pi.sh
 ```
 
 If you want optional cloud AI features:
 
 ```bash
 cp .env.example .env
-export OPENAI_API_KEY="your-key"
+nano .env
 ```
 
 If you want API protection:
 
 ```bash
-export PICARX_API_TOKEN="change-me"
+nano .env
 ```
 
 ### Run over SSH
 
 ```bash
 cd /path/to/Picar-px
-source .venv/bin/activate
-python -m picarx_unified
+bash scripts/install_pi.sh --run-only
 ```
 
 Or:
 
 ```bash
-./scripts/run_pi.sh
+bash scripts/run_pi.sh
 ```
 
 If your PiCar-X library or Robot HAT access requires elevated permissions on your setup, run the service with the same privilege level you normally use for official SunFounder motor-control scripts.
@@ -330,6 +336,8 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now picarx-unified.service
 sudo systemctl status picarx-unified.service
 ```
+
+The service runs the same bootstrap script in `--run-only` mode, so the manual flow and boot flow stay aligned.
 
 ## 8. Future improvements
 

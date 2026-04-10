@@ -1,4 +1,4 @@
-const CONFIG = {
+﻿const CONFIG = {
   driveRepeatMs: 250,
   refreshIntervalMs: 2500,
   maxMessages: 18,
@@ -6,6 +6,7 @@ const CONFIG = {
 
 const ENDPOINTS = {
   state: "/api/state",
+  settings: "/api/settings",
   health: "/api/health",
   drive: "/api/drive",
   driveStop: "/api/drive/stop",
@@ -18,15 +19,10 @@ const ENDPOINTS = {
   voiceSocket: "/ws/voice",
 };
 
-const DRIVE_KEYMAP = {
-  w: { speed: 35, steering: 0 },
-  a: { speed: 25, steering: -25 },
-  d: { speed: 25, steering: 25 },
-  s: { speed: -25, steering: 0 },
-};
-
 const state = {
+  activeTab: "drive",
   session: null,
+  settingsDirty: false,
   audioContext: null,
   playbackCursor: 0,
   ws: null,
@@ -40,45 +36,71 @@ const state = {
   recognition: null,
   transcript: "",
   driveInterval: null,
-  activeDriveButton: null,
   driveCommand: null,
+  activeDriveButton: null,
   activeKey: null,
   refreshPromise: null,
   refreshQueued: false,
 };
 
 const el = {
-  voiceModeLabel: document.querySelector("#voice-mode-label"),
-  audioTargetLabel: document.querySelector("#audio-target-label"),
-  hardwareLabel: document.querySelector("#hardware-label"),
-  estopLabel: document.querySelector("#estop-label"),
+  tabButtons: [...document.querySelectorAll("[data-tab-button]")],
+  tabPanels: [...document.querySelectorAll(".tab-panel")],
   sessionUpdatedLabel: document.querySelector("#session-updated-label"),
   driveStateLabel: document.querySelector("#drive-state-label"),
   cameraStateLabel: document.querySelector("#camera-state-label"),
-  driveSummaryLabel: document.querySelector("#drive-summary-label"),
-  cameraSummaryLabel: document.querySelector("#camera-summary-label"),
-  visionUpdatedLabel: document.querySelector("#vision-updated-label"),
+  estopLabel: document.querySelector("#estop-label"),
+  voiceModeLabel: document.querySelector("#voice-mode-label"),
+  audioTargetLabel: document.querySelector("#audio-target-label"),
+  hardwareLabel: document.querySelector("#hardware-label"),
   systemStatusLabel: document.querySelector("#system-status-label"),
+  driveSummaryLabel: document.querySelector("#drive-summary-label"),
+  lastErrorLabel: document.querySelector("#last-error-label"),
+  driveSpeedSlider: document.querySelector("#drive-speed-slider"),
+  driveSpeedValue: document.querySelector("#drive-speed-value"),
+  stopButton: document.querySelector("#stop-btn"),
+  clearEstop: document.querySelector("#clear-estop-btn"),
+  refresh: document.querySelector("#refresh-btn"),
+  driveButtons: [...document.querySelectorAll(".drive")],
+  visionSummary: document.querySelector("#vision-summary"),
   panSlider: document.querySelector("#pan-slider"),
   tiltSlider: document.querySelector("#tilt-slider"),
   panValue: document.querySelector("#pan-value"),
   tiltValue: document.querySelector("#tilt-value"),
-  visionSummary: document.querySelector("#vision-summary"),
-  speechStatus: document.querySelector("#speech-status"),
-  messages: document.querySelector("#messages"),
-  messageCountLabel: document.querySelector("#message-count-label"),
-  visionAnswer: document.querySelector("#vision-answer"),
+  centerCamera: document.querySelector("#center-camera-btn"),
+  cameraCenter: document.querySelector("#camera-center-btn"),
+  cameraLeft: document.querySelector("#camera-left-btn"),
+  cameraRight: document.querySelector("#camera-right-btn"),
+  cameraUp: document.querySelector("#camera-up-btn"),
+  cameraDown: document.querySelector("#camera-down-btn"),
+  cameraFollowToggle: document.querySelector("#camera-follow-toggle"),
+  cameraStepBadge: document.querySelector("#camera-step-badge"),
+  presetButtons: [...document.querySelectorAll(".preset-chip")],
   voiceModeSelect: document.querySelector("#voice-mode-select"),
   audioTargetSelect: document.querySelector("#audio-target-select"),
   pushToTalk: document.querySelector("#push-to-talk-btn"),
-  centerCamera: document.querySelector("#center-camera-btn"),
-  stopButton: document.querySelector("#stop-btn"),
-  clearEstop: document.querySelector("#clear-estop-btn"),
-  refresh: document.querySelector("#refresh-btn"),
+  speechStatus: document.querySelector("#speech-status"),
+  messages: document.querySelector("#messages"),
+  messageCountLabel: document.querySelector("#message-count-label"),
+  personDetectedLabel: document.querySelector("#person-detected-label"),
+  visionUpdatedLabel: document.querySelector("#vision-updated-label"),
+  aiProviderLabel: document.querySelector("#ai-provider-label"),
+  lastBehaviorLabel: document.querySelector("#last-behavior-label"),
+  lastGreetingLabel: document.querySelector("#last-greeting-label"),
   visionForm: document.querySelector("#vision-form"),
   visionQuestion: document.querySelector("#vision-question"),
-  driveButtons: [...document.querySelectorAll(".drive")],
+  visionAnswer: document.querySelector("#vision-answer"),
   promptChips: [...document.querySelectorAll(".prompt-chip")],
+  settingsForm: document.querySelector("#settings-form"),
+  greetingTextInput: document.querySelector("#greeting-text-input"),
+  greetingEnabledInput: document.querySelector("#greeting-enabled-input"),
+  autoTrackingInput: document.querySelector("#auto-tracking-input"),
+  greetingModeSelect: document.querySelector("#greeting-mode-select"),
+  startupVoiceModeSelect: document.querySelector("#startup-voice-mode-select"),
+  startupAudioTargetSelect: document.querySelector("#startup-audio-target-select"),
+  cameraStepInput: document.querySelector("#camera-step-input"),
+  cameraStepValue: document.querySelector("#camera-step-value"),
+  settingsSaveStatus: document.querySelector("#settings-save-status"),
 };
 
 function titleCase(value) {
@@ -117,13 +139,6 @@ function formatDriveSummary(drive) {
   return `${direction} ${Math.abs(drive.speed)} / steer ${signed(drive.steering)}`;
 }
 
-function formatCameraSummary(camera) {
-  if (!camera || (camera.pan === 0 && camera.tilt === 0)) {
-    return "Centered";
-  }
-  return `Pan ${signed(camera.pan)} / Tilt ${signed(camera.tilt)}`;
-}
-
 function formatSystemStatus(session) {
   if (!session) {
     return "Connecting";
@@ -139,22 +154,12 @@ function formatSystemStatus(session) {
 
 function defaultVoiceHint(mode) {
   if (mode === "relay") {
-    return "Relay mode streams your mic to the selected audio target.";
+    return "Relay mode streams your browser microphone to the selected speaker target.";
   }
   if (mode === "ai_reply") {
-    return "AI Reply mode records your speech, commits the turn, and returns spoken output.";
+    return "AI Reply records one spoken turn, then speaks the Gemini-backed reply.";
   }
   return "Microphone is idle. Choose Relay or AI Reply to open the voice path.";
-}
-
-function toneForVoiceMode(mode) {
-  if (mode === "relay") {
-    return "cool";
-  }
-  if (mode === "ai_reply") {
-    return "warm";
-  }
-  return "neutral";
 }
 
 function setButtonActive(button, isActive) {
@@ -165,26 +170,26 @@ function setButtonActive(button, isActive) {
   button.setAttribute("aria-pressed", isActive ? "true" : "false");
 }
 
-function setCardTone(node, tone) {
-  const card = node.closest(".status-card, .telemetry-card");
-  if (card) {
-    card.dataset.tone = tone;
-  }
-}
-
-function updateMessageCount() {
-  const count = el.messages.childElementCount;
-  el.messageCountLabel.textContent = `${count} ${count === 1 ? "entry" : "entries"}`;
-}
-
 function setSpeechStatus(message, tone = "neutral") {
   el.speechStatus.textContent = message;
   el.speechStatus.dataset.tone = tone;
 }
 
+function setSettingsStatus(message, tone = "neutral") {
+  el.settingsSaveStatus.textContent = message;
+  el.settingsSaveStatus.dataset.tone = tone;
+}
+
 function syncRangeReadouts() {
   el.panValue.textContent = `${el.panSlider.value}deg`;
   el.tiltValue.textContent = `${el.tiltSlider.value}deg`;
+  el.driveSpeedValue.textContent = `${el.driveSpeedSlider.value}%`;
+  el.cameraStepValue.textContent = `${el.cameraStepInput.value}deg`;
+}
+
+function updateMessageCount() {
+  const count = el.messages.childElementCount;
+  el.messageCountLabel.textContent = `${count} ${count === 1 ? "entry" : "entries"}`;
 }
 
 function logMessage(role, text) {
@@ -194,19 +199,19 @@ function logMessage(role, text) {
   const head = document.createElement("div");
   head.className = "message-head";
 
-  const rolePill = document.createElement("span");
-  rolePill.className = "role-pill";
-  rolePill.textContent = titleCase(role);
+  const pill = document.createElement("span");
+  pill.className = "role-pill";
+  pill.textContent = titleCase(role);
 
-  const stamp = document.createElement("span");
-  stamp.className = "message-time";
-  stamp.textContent = formatTimestamp(new Date().toISOString());
+  const time = document.createElement("span");
+  time.className = "message-time";
+  time.textContent = formatTimestamp(new Date().toISOString());
 
   const body = document.createElement("div");
   body.className = "message-body";
   body.textContent = text;
 
-  head.append(rolePill, stamp);
+  head.append(pill, time);
   row.append(head, body);
   el.messages.prepend(row);
 
@@ -233,52 +238,65 @@ async function api(path, options = {}) {
   return response.json().catch(() => ({}));
 }
 
+function showTab(tabName) {
+  state.activeTab = tabName;
+  el.tabButtons.forEach((button) => {
+    button.dataset.active = button.dataset.tabButton === tabName ? "true" : "false";
+  });
+  el.tabPanels.forEach((panel) => {
+    panel.hidden = panel.id !== `tab-${tabName}`;
+  });
+}
+
+function syncSettingsForm(settings, force = false) {
+  if (state.settingsDirty && !force) {
+    return;
+  }
+  el.greetingTextInput.value = settings.greeting_text;
+  el.greetingEnabledInput.checked = settings.greeting_enabled;
+  el.autoTrackingInput.checked = settings.auto_tracking_enabled;
+  el.greetingModeSelect.value = settings.greeting_mode;
+  el.startupVoiceModeSelect.value = settings.startup_voice_mode;
+  el.startupAudioTargetSelect.value = settings.startup_audio_target;
+  el.cameraStepInput.value = String(settings.camera_step_degrees);
+  el.cameraFollowToggle.checked = settings.auto_tracking_enabled;
+  el.cameraStepBadge.textContent = `${settings.camera_step_degrees}deg`;
+  syncRangeReadouts();
+}
+
 function render(session) {
   state.session = session;
   document.body.dataset.estop = session.emergency_stop ? "active" : "clear";
 
-  el.voiceModeLabel.textContent = titleCase(session.voice_mode);
-  el.audioTargetLabel.textContent = titleCase(session.audio_target);
-  el.estopLabel.textContent = session.emergency_stop ? "Active" : "Clear";
   el.sessionUpdatedLabel.textContent = formatTimestamp(session.updated_at);
   el.driveStateLabel.textContent = `${signed(session.drive.speed)} spd / ${signed(session.drive.steering)} str`;
   el.cameraStateLabel.textContent = `P ${signed(session.camera.pan)}deg / T ${signed(session.camera.tilt)}deg`;
-  el.driveSummaryLabel.textContent = formatDriveSummary(session.drive);
-  el.cameraSummaryLabel.textContent = formatCameraSummary(session.camera);
-  el.visionUpdatedLabel.textContent = formatTimestamp(session.vision.analyzed_at);
+  el.estopLabel.textContent = session.emergency_stop ? "Active" : "Clear";
+  el.voiceModeLabel.textContent = titleCase(session.voice_mode);
+  el.audioTargetLabel.textContent = titleCase(session.audio_target);
   el.systemStatusLabel.textContent = formatSystemStatus(session);
-  el.panSlider.value = String(session.camera.pan);
-  el.tiltSlider.value = String(session.camera.tilt);
+  el.driveSummaryLabel.textContent = formatDriveSummary(session.drive);
+  el.lastErrorLabel.textContent = session.last_error || "No active error.";
+  el.visionSummary.textContent = session.vision.summary;
+  el.visionUpdatedLabel.textContent = formatTimestamp(session.vision.analyzed_at);
+  el.aiProviderLabel.textContent = titleCase(session.ai_provider);
+  el.personDetectedLabel.textContent = session.person_detected ? "Yes" : "No";
+  el.lastBehaviorLabel.textContent = session.last_behavior_action || "No behavior event yet";
+  el.lastGreetingLabel.textContent = session.last_greeting_text || "No greeting delivered yet.";
   el.voiceModeSelect.value = session.voice_mode;
   el.audioTargetSelect.value = session.audio_target;
-  el.visionSummary.textContent = session.vision.summary;
-
+  el.panSlider.value = String(session.camera.pan);
+  el.tiltSlider.value = String(session.camera.tilt);
   syncRangeReadouts();
-
-  setCardTone(el.voiceModeLabel, toneForVoiceMode(session.voice_mode));
-  setCardTone(el.audioTargetLabel, session.audio_target === "both" ? "warm" : "cool");
-  setCardTone(el.estopLabel, session.emergency_stop ? "danger" : "ok");
-  setCardTone(el.driveSummaryLabel, session.drive.speed === 0 ? "neutral" : "warm");
-  setCardTone(
-    el.cameraSummaryLabel,
-    session.camera.pan === 0 && session.camera.tilt === 0 ? "neutral" : "cool"
-  );
-  setCardTone(
-    el.systemStatusLabel,
-    session.emergency_stop ? "danger" : session.browser_connected ? "ok" : "neutral"
-  );
+  syncSettingsForm(session.settings);
 
   if (!state.captureActive && !state.awaitingReply) {
-    setSpeechStatus(defaultVoiceHint(session.voice_mode), toneForVoiceMode(session.voice_mode));
+    setSpeechStatus(defaultVoiceHint(session.voice_mode), session.voice_mode === "mute" ? "neutral" : "cool");
   }
 }
 
 function renderHealth(health) {
-  const hardwareText = `${titleCase(health.hardware_backend)} / ${titleCase(health.camera_backend)}`;
-  el.hardwareLabel.textContent = hardwareText;
-  const looksMock =
-    hardwareText.toLowerCase().includes("mock") || health.camera_backend.toLowerCase() === "none";
-  setCardTone(el.hardwareLabel, looksMock ? "neutral" : "ok");
+  el.hardwareLabel.textContent = `${titleCase(health.hardware_backend)} / ${titleCase(health.camera_backend)}`;
 }
 
 async function refreshState() {
@@ -286,12 +304,8 @@ async function refreshState() {
     state.refreshQueued = true;
     return state.refreshPromise;
   }
-
   state.refreshPromise = (async () => {
-    const [session, health] = await Promise.all([
-      api(ENDPOINTS.state),
-      api(ENDPOINTS.health),
-    ]);
+    const [session, health] = await Promise.all([api(ENDPOINTS.state), api(ENDPOINTS.health)]);
     render(session);
     renderHealth(health);
   })();
@@ -302,9 +316,7 @@ async function refreshState() {
     state.refreshPromise = null;
     if (state.refreshQueued) {
       state.refreshQueued = false;
-      queueMicrotask(() => {
-        refreshState().catch(() => null);
-      });
+      queueMicrotask(() => refreshState().catch(() => null));
     }
   }
 }
@@ -364,7 +376,7 @@ function closeVoiceSocket(reason = "Client closing") {
   try {
     state.ws.close(1000, reason);
   } catch (_error) {
-    // Ignore socket close races during shutdown.
+    // Ignore close races.
   }
   state.ws = null;
   state.socketPromise = null;
@@ -381,7 +393,7 @@ function handleVoiceSocketMessage(payload) {
   }
   if (payload.type === "assistant_audio") {
     state.awaitingReply = false;
-    setSpeechStatus("Assistant response ready for playback.", "ok");
+    setSpeechStatus("Assistant audio ready for playback.", "ok");
     playAssistantAudio(payload.audio).catch(() => null);
     return;
   }
@@ -411,7 +423,6 @@ async function openVoiceSocket() {
 
   const protocol = window.location.protocol === "https:" ? "wss" : "ws";
   const socketUrl = `${protocol}://${window.location.host}${ENDPOINTS.voiceSocket}`;
-
   state.socketPromise = new Promise((resolve, reject) => {
     const socket = new WebSocket(socketUrl);
     state.ws = socket;
@@ -420,23 +431,10 @@ async function openVoiceSocket() {
       const payload = JSON.parse(event.data);
       handleVoiceSocketMessage(payload);
     });
-
-    socket.addEventListener(
-      "open",
-      () => {
-        resolve(socket);
-      },
-      { once: true }
-    );
-
-    socket.addEventListener(
-      "error",
-      () => {
-        reject(new Error("Unable to open the voice link."));
-      },
-      { once: true }
-    );
-
+    socket.addEventListener("open", () => resolve(socket), { once: true });
+    socket.addEventListener("error", () => reject(new Error("Unable to open the voice link.")), {
+      once: true,
+    });
     socket.addEventListener("close", () => {
       state.ws = null;
       state.socketPromise = null;
@@ -462,8 +460,6 @@ async function ensureCapturePipeline() {
   state.mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
   state.sourceNode = state.audioContext.createMediaStreamSource(state.mediaStream);
   state.workletNode = new AudioWorkletNode(state.audioContext, "pcm-capture");
-
-  // Keep the worklet connected without playing mic monitoring through the speakers.
   state.monitorNode = state.audioContext.createGain();
   state.monitorNode.gain.value = 0;
 
@@ -503,7 +499,6 @@ async function startTalking() {
     setSpeechStatus("Switch voice mode out of Mute before opening the microphone.", "neutral");
     return;
   }
-
   await openVoiceSocket();
   await ensureCapturePipeline();
   configureSpeechRecognition();
@@ -520,7 +515,6 @@ async function startTalking() {
       // Recognition may already be active.
     }
   }
-
   setSpeechStatus("Listening for audio input...", "cool");
 }
 
@@ -528,7 +522,6 @@ async function stopTalking() {
   if (!state.captureActive) {
     return;
   }
-
   state.captureActive = false;
   setButtonActive(el.pushToTalk, false);
 
@@ -536,23 +529,19 @@ async function stopTalking() {
     try {
       state.recognition.stop();
     } catch (_error) {
-      // Ignore recognition stop races.
+      // Ignore stop races.
     }
   }
 
   if (!state.ws || state.ws.readyState !== WebSocket.OPEN) {
     return;
   }
-
   if (state.transcript) {
     state.ws.send(JSON.stringify({ type: "transcript", text: state.transcript }));
   }
   state.awaitingReply = state.session?.voice_mode === "ai_reply";
   state.ws.send(JSON.stringify({ type: "commit" }));
-  setSpeechStatus(
-    state.awaitingReply ? "Waiting for assistant reply..." : "Finishing relay...",
-    "warm"
-  );
+  setSpeechStatus(state.awaitingReply ? "Waiting for assistant reply..." : "Finishing relay...", "warm");
 }
 
 async function playRelayChunk(audioBase64, sampleRate) {
@@ -576,6 +565,9 @@ async function playRelayChunk(audioBase64, sampleRate) {
 }
 
 async function playAssistantAudio(audioBase64) {
+  if (!state.session || !["browser", "both"].includes(state.session.audio_target)) {
+    return;
+  }
   await ensureAudioContext();
   const bytes = bytesFromBase64(audioBase64);
   const buffer = await state.audioContext.decodeAudioData(bytes.buffer.slice(0));
@@ -592,6 +584,55 @@ async function applySessionAction(path, json) {
   });
   render(session);
   return session;
+}
+
+function mergedSettings(patch = {}) {
+  if (!state.session) {
+    throw new Error("Robot session is not ready yet.");
+  }
+  return {
+    ...state.session.settings,
+    ...patch,
+  };
+}
+
+async function saveSettingsPatch(patch) {
+  const session = await applySessionAction(ENDPOINTS.settings, mergedSettings(patch));
+  state.settingsDirty = false;
+  syncSettingsForm(session.settings, true);
+  setSettingsStatus("Settings saved.", "ok");
+  return session;
+}
+
+async function updateCamera(pan, tilt) {
+  await applySessionAction(ENDPOINTS.camera, { pan, tilt });
+}
+
+async function moveCameraBy(deltaPan, deltaTilt) {
+  if (!state.session) {
+    return;
+  }
+  const pan = Number(state.session.camera.pan) + deltaPan;
+  const tilt = Number(state.session.camera.tilt) + deltaTilt;
+  el.panSlider.value = String(pan);
+  el.tiltSlider.value = String(tilt);
+  syncRangeReadouts();
+  await updateCamera(pan, tilt);
+}
+
+function currentDriveSpeed() {
+  return Number(el.driveSpeedSlider.value);
+}
+
+function buildDriveCommand(speedSign, steering, source) {
+  if (speedSign === 0) {
+    return { speed: 0, steering: 0, source };
+  }
+  return {
+    speed: currentDriveSpeed() * speedSign,
+    steering,
+    source,
+  };
 }
 
 async function sendDriveCommand(command) {
@@ -624,7 +665,6 @@ async function startDriveLoop(command, button = null) {
     setSpeechStatus("Reset emergency stop before driving.", "danger");
     return;
   }
-
   if (
     state.driveCommand &&
     state.driveCommand.speed === command.speed &&
@@ -633,14 +673,12 @@ async function startDriveLoop(command, button = null) {
   ) {
     return;
   }
-
   clearDriveLoop();
   state.driveCommand = command;
   if (button) {
     state.activeDriveButton = button;
     setButtonActive(button, true);
   }
-
   try {
     await sendDriveCommand(command);
     state.driveInterval = window.setInterval(() => {
@@ -664,9 +702,7 @@ function bindMomentaryPointerControl(node, { start, stop }) {
       return;
     }
     pointerId = null;
-    Promise.resolve(stop()).catch((error) => {
-      setSpeechStatus(error.message, "danger");
-    });
+    Promise.resolve(stop()).catch((error) => setSpeechStatus(error.message, "danger"));
   };
 
   node.addEventListener("pointerdown", (event) => {
@@ -677,7 +713,7 @@ function bindMomentaryPointerControl(node, { start, stop }) {
     try {
       node.setPointerCapture(event.pointerId);
     } catch (_error) {
-      // Pointer capture is best-effort across browsers.
+      // Best effort.
     }
     event.preventDefault();
     Promise.resolve(start(event)).catch((error) => {
@@ -693,27 +729,36 @@ function bindMomentaryPointerControl(node, { start, stop }) {
 }
 
 function bindDriveButton(button) {
-  const command = {
-    speed: Number(button.dataset.speed),
-    steering: Number(button.dataset.steering),
-    source: "browser",
-  };
-
+  const speedSign = Number(button.dataset.speedSign);
+  const steering = Number(button.dataset.steering);
+  if (speedSign === 0 && steering === 0) {
+    button.addEventListener("click", () => {
+      stopDriveLoop().catch(() => null);
+    });
+    return;
+  }
   bindMomentaryPointerControl(button, {
-    start: () => startDriveLoop(command, button),
+    start: () => startDriveLoop(buildDriveCommand(speedSign, steering, "browser"), button),
     stop: () => stopDriveLoop(),
   });
 }
 
 function bindKeyboard() {
+  const keyMap = {
+    w: () => buildDriveCommand(1, 0, "keyboard"),
+    a: () => buildDriveCommand(1, -25, "keyboard"),
+    d: () => buildDriveCommand(1, 25, "keyboard"),
+    s: () => buildDriveCommand(-1, 0, "keyboard"),
+  };
+
   window.addEventListener("keydown", (event) => {
     const key = event.key.toLowerCase();
-    if (!DRIVE_KEYMAP[key] || state.activeKey === key || event.repeat) {
+    if (!keyMap[key] || state.activeKey === key || event.repeat) {
       return;
     }
     state.activeKey = key;
     event.preventDefault();
-    startDriveLoop({ ...DRIVE_KEYMAP[key], source: "keyboard" }).catch(() => null);
+    startDriveLoop(keyMap[key]()).catch(() => null);
   });
 
   window.addEventListener("keyup", (event) => {
@@ -728,13 +773,6 @@ function bindKeyboard() {
     state.activeKey = null;
     stopDriveLoop().catch(() => null);
     stopTalking().catch(() => null);
-  });
-}
-
-async function updateCamera() {
-  await applySessionAction(ENDPOINTS.camera, {
-    pan: Number(el.panSlider.value),
-    tilt: Number(el.tiltSlider.value),
   });
 }
 
@@ -776,7 +814,47 @@ function registerGlobalCleanup() {
   });
 }
 
+function wireSettingsDirtyTracking() {
+  [
+    el.greetingTextInput,
+    el.greetingEnabledInput,
+    el.autoTrackingInput,
+    el.greetingModeSelect,
+    el.startupVoiceModeSelect,
+    el.startupAudioTargetSelect,
+    el.cameraStepInput,
+  ].forEach((node) => {
+    node.addEventListener("input", () => {
+      state.settingsDirty = true;
+      setSettingsStatus("Unsaved settings changes.", "warm");
+      syncRangeReadouts();
+    });
+    node.addEventListener("change", () => {
+      state.settingsDirty = true;
+      setSettingsStatus("Unsaved settings changes.", "warm");
+      syncRangeReadouts();
+    });
+  });
+}
+
+function settingsPayloadFromForm() {
+  return {
+    greeting_text: el.greetingTextInput.value.trim(),
+    greeting_enabled: el.greetingEnabledInput.checked,
+    greeting_mode: el.greetingModeSelect.value,
+    auto_tracking_enabled: el.autoTrackingInput.checked,
+    camera_step_degrees: Number(el.cameraStepInput.value),
+    startup_voice_mode: el.startupVoiceModeSelect.value,
+    startup_audio_target: el.startupAudioTargetSelect.value,
+  };
+}
+
 async function init() {
+  showTab("drive");
+  el.tabButtons.forEach((button) => {
+    button.addEventListener("click", () => showTab(button.dataset.tabButton));
+  });
+
   el.driveButtons.forEach((button) => {
     setButtonActive(button, false);
     bindDriveButton(button);
@@ -785,6 +863,7 @@ async function init() {
 
   bindKeyboard();
   registerGlobalCleanup();
+  wireSettingsDirtyTracking();
   syncRangeReadouts();
   updateMessageCount();
   await refreshState();
@@ -795,31 +874,60 @@ async function init() {
   });
 
   el.voiceModeSelect.addEventListener("change", async () => {
-    await applySessionAction(ENDPOINTS.voiceMode, {
-      mode: el.voiceModeSelect.value,
-    });
+    await applySessionAction(ENDPOINTS.voiceMode, { mode: el.voiceModeSelect.value });
   });
 
   el.audioTargetSelect.addEventListener("change", async () => {
-    await applySessionAction(ENDPOINTS.audioTarget, {
-      target: el.audioTargetSelect.value,
-    });
+    await applySessionAction(ENDPOINTS.audioTarget, { target: el.audioTargetSelect.value });
   });
+
+  el.driveSpeedSlider.addEventListener("input", syncRangeReadouts);
 
   el.centerCamera.addEventListener("click", async () => {
     el.panSlider.value = "0";
     el.tiltSlider.value = "0";
     syncRangeReadouts();
-    await updateCamera();
+    await updateCamera(0, 0);
+  });
+
+  el.cameraCenter.addEventListener("click", async () => {
+    await updateCamera(0, 0);
+  });
+
+  el.cameraLeft.addEventListener("click", async () => {
+    await moveCameraBy(-state.session.settings.camera_step_degrees, 0);
+  });
+  el.cameraRight.addEventListener("click", async () => {
+    await moveCameraBy(state.session.settings.camera_step_degrees, 0);
+  });
+  el.cameraUp.addEventListener("click", async () => {
+    await moveCameraBy(0, state.session.settings.camera_step_degrees);
+  });
+  el.cameraDown.addEventListener("click", async () => {
+    await moveCameraBy(0, -state.session.settings.camera_step_degrees);
+  });
+
+  el.presetButtons.forEach((button) => {
+    button.addEventListener("click", async () => {
+      await updateCamera(Number(button.dataset.pan), Number(button.dataset.tilt));
+    });
+  });
+
+  el.cameraFollowToggle.addEventListener("change", async () => {
+    await saveSettingsPatch({ auto_tracking_enabled: el.cameraFollowToggle.checked });
   });
 
   el.panSlider.addEventListener("input", syncRangeReadouts);
   el.tiltSlider.addEventListener("input", syncRangeReadouts);
   el.panSlider.addEventListener("change", () => {
-    updateCamera().catch((error) => setSpeechStatus(error.message, "danger"));
+    updateCamera(Number(el.panSlider.value), Number(el.tiltSlider.value)).catch((error) =>
+      setSpeechStatus(error.message, "danger")
+    );
   });
   el.tiltSlider.addEventListener("change", () => {
-    updateCamera().catch((error) => setSpeechStatus(error.message, "danger"));
+    updateCamera(Number(el.panSlider.value), Number(el.tiltSlider.value)).catch((error) =>
+      setSpeechStatus(error.message, "danger")
+    );
   });
 
   el.stopButton.addEventListener("click", async () => {
@@ -851,8 +959,24 @@ async function init() {
 
   el.visionForm.addEventListener("submit", async (event) => {
     event.preventDefault();
-    const question = el.visionQuestion.value.trim();
-    await submitVisionQuestion(question);
+    await submitVisionQuestion(el.visionQuestion.value.trim());
+  });
+
+  el.settingsForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const payload = settingsPayloadFromForm();
+    if (!payload.greeting_text) {
+      setSettingsStatus("Greeting text cannot be blank.", "danger");
+      return;
+    }
+    try {
+      const session = await applySessionAction(ENDPOINTS.settings, payload);
+      state.settingsDirty = false;
+      syncSettingsForm(session.settings, true);
+      setSettingsStatus("Settings saved.", "ok");
+    } catch (error) {
+      setSettingsStatus(error.message, "danger");
+    }
   });
 
   window.setInterval(() => {

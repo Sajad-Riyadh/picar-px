@@ -28,6 +28,33 @@ def _drain_initial_state_messages(websocket) -> None:
 
 
 class VoiceSocketTests(unittest.TestCase):
+    def test_settings_round_trip_updates_persisted_behavior_controls(self) -> None:
+        with TemporaryDirectory() as tmp_dir, patch.dict(os.environ, _voice_env(tmp_dir), clear=False):
+            with TestClient(create_app()) as client:
+                response = client.post(
+                    "/api/settings",
+                    json={
+                        "greeting_text": "Welcome aboard.",
+                        "greeting_enabled": True,
+                        "greeting_mode": "ai_live_greeting",
+                        "auto_tracking_enabled": False,
+                        "camera_step_degrees": 8,
+                        "startup_voice_mode": "relay",
+                        "startup_audio_target": "both",
+                    },
+                )
+                self.assertEqual(response.status_code, 200)
+                state_payload = response.json()
+                self.assertEqual(state_payload["settings"]["greeting_text"], "Welcome aboard.")
+                self.assertEqual(state_payload["settings"]["greeting_mode"], "ai_live_greeting")
+                self.assertFalse(state_payload["settings"]["auto_tracking_enabled"])
+
+                settings_response = client.get("/api/settings")
+                self.assertEqual(settings_response.status_code, 200)
+                settings_payload = settings_response.json()
+                self.assertEqual(settings_payload["camera_step_degrees"], 8)
+                self.assertEqual(settings_payload["startup_audio_target"], "both")
+
     def test_invalid_json_returns_error_and_socket_stays_open(self) -> None:
         with TemporaryDirectory() as tmp_dir, patch.dict(os.environ, _voice_env(tmp_dir), clear=False):
             with TestClient(create_app()) as client:

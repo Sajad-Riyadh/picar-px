@@ -9,7 +9,7 @@ description = "Unified FastAPI control stack for SunFounder PiCar-X on Raspberry
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [
-  { name = "OpenAI Codex" }
+  { name = "Codex" }
 ]
 dependencies = [
   "fastapi>=0.115.0",
@@ -18,7 +18,7 @@ dependencies = [
   "numpy>=1.26.0",
   "opencv-python-headless>=4.10.0.84",
   "pydantic>=2.9.0",
-  "openai>=1.51.0",
+  "google-genai>=1.72.0",
 ]
 
 [tool.setuptools.packages.find]
