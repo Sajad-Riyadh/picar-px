@@ -1,10 +1,31 @@
 from __future__ import annotations
 
+import os
 import threading
 import time
 
 from .hardware.camera import CameraService, cv2
 from .models import Detection, VisionSnapshot, utc_now
+
+
+def _find_haarcascade() -> str | None:
+    if cv2 is None:
+        return None
+    filename = "haarcascade_frontalface_default.xml"
+    if hasattr(cv2, "data") and hasattr(cv2.data, "haarcascades"):
+        candidate = cv2.data.haarcascades + filename
+        if os.path.isfile(candidate):
+            return candidate
+    for search_dir in (
+        "/usr/share/opencv4/haarcascades",
+        "/usr/share/opencv/haarcascades",
+        "/usr/local/share/opencv4/haarcascades",
+        "/usr/local/share/OpenCV/haarcascades",
+    ):
+        candidate = os.path.join(search_dir, filename)
+        if os.path.isfile(candidate):
+            return candidate
+    return None
 
 
 class VisionService:
@@ -16,8 +37,9 @@ class VisionService:
         self._snapshot = VisionSnapshot(summary="Vision loop is starting.")
         self._face_cascade = None
         if cv2 is not None:
-            cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
-            self._face_cascade = cv2.CascadeClassifier(cascade_path)
+            cascade_path = _find_haarcascade()
+            if cascade_path:
+                self._face_cascade = cv2.CascadeClassifier(cascade_path)
 
     def start(self) -> None:
         if self._running:
