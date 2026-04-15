@@ -5,14 +5,18 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=/opt/picarx-unified
+User=car
+Group=car
+SupplementaryGroups=i2c gpio spi dialout video render
+WorkingDirectory=/home/car/picar-px
+Environment=PATH=/home/car/picar-px/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 Environment=PICARX_HOST=0.0.0.0
 Environment=PICARX_PORT=8080
-ExecStart=/bin/bash /opt/picarx-unified/scripts/install_pi.sh --run-only
+ExecStart=/home/car/picar-px/.venv/bin/python -m picarx_unified
 Restart=on-failure
-RestartSec=3
-User=root
-Group=root
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=multi-user.target

@@ -49,9 +49,14 @@ class PicarxAdapter:
     def __init__(self, config: AppConfig) -> None:
         self._config = config
         self._lock = threading.Lock()
-        self._hardware = self._build_hardware()
+        self._hardware = self._init_hardware()
         self._backend_name = type(self._hardware).__name__
         self._snapshot = HardwareSnapshot()
+        # If real hardware was requested but unavailable, retry in background
+        if not self._config.use_mock_hardware and self.is_mock:
+            threading.Thread(
+                target=self._retry_hardware_in_background, daemon=True
+            ).start()
 
     @property
     def backend_name(self) -> str:
@@ -61,25 +66,48 @@ class PicarxAdapter:
     def is_mock(self) -> bool:
         return isinstance(self._hardware, MockPicarx)
 
-    def _build_hardware(self) -> Any:
+    def _init_hardware(self) -> Any:
         if self._config.use_mock_hardware:
             return MockPicarx()
-        max_retries = 5
+        try:
+            from picarx import Picarx
+
+            hw = Picarx()
+            logger.info("Picarx hardware initialized on first attempt")
+            return hw
+        except Exception as exc:
+            logger.warning(
+                "Initial Picarx init failed: %s — starting with MockPicarx, "
+                "will keep retrying in background",
+                exc,
+            )
+            return MockPicarx()
+
+    def _retry_hardware_in_background(self) -> None:
+        max_retries = 60  # 60 × 5 s = up to 5 minutes
         for attempt in range(1, max_retries + 1):
+            time.sleep(5)
             try:
                 from picarx import Picarx
 
                 hw = Picarx()
-                logger.info("Picarx hardware initialized (attempt %d)", attempt)
-                return hw
+                with self._lock:
+                    self._hardware = hw
+                    self._backend_name = type(hw).__name__
+                logger.info(
+                    "Picarx hardware initialized in background (attempt %d)", attempt
+                )
+                return
             except Exception as exc:
                 logger.warning(
-                    "Picarx init attempt %d/%d failed: %s", attempt, max_retries, exc
+                    "Background Picarx init attempt %d/%d: %s",
+                    attempt,
+                    max_retries,
+                    exc,
                 )
-                if attempt < max_retries:
-                    time.sleep(3)
-        logger.error("All Picarx init attempts failed — falling back to MockPicarx")
-        return MockPicarx()
+        logger.error(
+            "All background Picarx init attempts failed — staying with MockPicarx"
+        )
 
     def drive(self, speed: int, steering: int) -> None:
         with self._lock:
