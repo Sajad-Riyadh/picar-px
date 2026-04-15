@@ -50,18 +50,16 @@ button, input, select { font: inherit; color: inherit; }
    E-STOP BANNER
    ══════════════════════════════════════════ */
 .estop-banner {
-  position: fixed;
-  z-index: 9998;
-  top: 0; left: 0; right: 0;
+  /* In-flow inside .app-layout flex column; pushes content down when visible */
   background: linear-gradient(90deg, #991b1b, #dc2626);
   color: white;
   padding: 8px 16px;
   font-weight: 700;
   font-size: 13px;
+  flex-shrink: 0;
+  z-index: 10;
 }
 .estop-banner-inner {
-  max-width: 1400px;
-  margin: 0 auto;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -92,18 +90,30 @@ button, input, select { font: inherit; color: inherit; }
   gap: 12px;
   z-index: 100;
 }
-.topbar-left, .topbar-right {
+.topbar-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+.topbar-right {
   display: flex;
   align-items: center;
   gap: 10px;
   flex-shrink: 0;
+  margin-left: auto;
 }
-.topbar-right { margin-left: auto; }
 .topbar-chips {
   display: flex;
   gap: 6px;
   align-items: center;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
 }
+.topbar-chips::-webkit-scrollbar { display: none; }
 .brand {
   display: flex;
   align-items: center;
@@ -701,6 +711,30 @@ input[type="text"]:focus, select:focus {
 }
 .save-row { display: flex; flex-direction: column; gap: 8px; }
 
+/* ---- Safety panel ---- */
+.safety-note {
+  padding: 12px 14px;
+  background: rgba(239,68,68,.05);
+  border: 1px solid rgba(239,68,68,.18);
+  border-radius: var(--radius);
+  font-size: 13px;
+  color: var(--text2);
+  line-height: 1.6;
+}
+.safety-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* ---- Per-panel color accents (left border on card-head) ---- */
+#panel-drive .card-head    { padding-left: 13px; border-left: 3px solid var(--accent); }
+#panel-camera .card-head   { padding-left: 13px; border-left: 3px solid var(--cool); }
+#panel-voice .card-head    { padding-left: 13px; border-left: 3px solid var(--ok); }
+#panel-ai .card-head       { padding-left: 13px; border-left: 3px solid #8b5cf6; }
+#panel-settings .card-head { padding-left: 13px; border-left: 3px solid var(--warn); }
+#panel-safety .card-head   { padding-left: 13px; border-left: 3px solid var(--danger); }
+
 /* ══════════════════════════════════════════
    E-STOP ACTIVE — Global State
    ══════════════════════════════════════════ */
@@ -783,6 +817,13 @@ input[type="text"]:focus, select:focus {
 
   /* ── Panels ── */
   .ctrl-panel { padding: 12px; }
+
+  /* ── On mobile, controls-col itself scrolls; remove nested scroll from tab-panels ── */
+  .tab-panels {
+    flex: none;
+    overflow: visible;
+    min-height: 0;
+  }
 
   /* ── Fields stack ── */
   .field-pair { grid-template-columns: 1fr; }

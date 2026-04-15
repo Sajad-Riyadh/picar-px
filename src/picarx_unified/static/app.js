@@ -218,7 +218,7 @@ function updateMicBadge() {
     badge.textContent = "Off"; badge.dataset.state = "off";
   }
   if (el.micChip) {
-    el.micChip.textContent = app.captureActive ? "🎤 Live" : "🎤 Off";
+    el.micChip.textContent = app.captureActive ? "Mic: Live" : "Mic: Off";
     el.micChip.dataset.tone = app.captureActive ? "active" : "neutral";
   }
 }
@@ -301,7 +301,7 @@ function render(session) {
   if (el.estopBanner) el.estopBanner.hidden = !estop;
 
   if (el.safetyChip) {
-    el.safetyChip.textContent = estop ? "⚠ E-STOP" : "✓ Safety OK";
+    el.safetyChip.textContent = estop ? "! E-STOP" : "Safety OK";
     el.safetyChip.dataset.tone = estop ? "danger" : "ok";
   }
   if (el.modeChip) {
@@ -309,11 +309,11 @@ function render(session) {
     el.modeChip.dataset.tone = estop ? "danger" : "cool";
   }
   if (el.voiceChip) {
-    el.voiceChip.textContent = `🔊 ${titleCase(session.voice_mode)}`;
+    el.voiceChip.textContent = `Voice: ${titleCase(session.voice_mode)}`;
     el.voiceChip.dataset.tone = session.voice_mode === "mute" ? "neutral" : "cool";
   }
   if (el.detectChip) {
-    el.detectChip.textContent = session.person_detected ? "👁 Person" : "👁 Idle";
+    el.detectChip.textContent = session.person_detected ? "Detect: Yes" : "Detect: Idle";
     el.detectChip.dataset.tone = session.person_detected ? "active" : "neutral";
   }
 
@@ -347,7 +347,7 @@ function render(session) {
 
 function renderHealth(health) {
   if (el.hwChip) {
-    el.hwChip.textContent = `⚙ ${titleCase(health.hardware_backend)}`;
+    el.hwChip.textContent = `HW: ${titleCase(health.hardware_backend)}`;
     el.hwChip.dataset.tone = health.hardware_backend === "mock" ? "warn" : "ok";
   }
   if (el.connDot)   el.connDot.dataset.ok = "true";
@@ -515,12 +515,12 @@ async function stopTalking() {
 async function toggleOpenMic(forceOff = false) {
   if (forceOff || app.openMic) {
     app.openMic = false; el.openMicToggle.checked = false;
-    el.micToggleBtn.textContent = "🎤 Open Mic";
+    el.micToggleBtn.textContent = "Open Mic";
     el.micToggleBtn.classList.remove("btn-danger"); el.micToggleBtn.classList.add("btn-accent");
     await stopTalking();
   } else {
     app.openMic = true; el.openMicToggle.checked = true;
-    el.micToggleBtn.textContent = "🔴 Mic On — Tap to Stop";
+    el.micToggleBtn.textContent = "Mic On \u2014 Stop";
     el.micToggleBtn.classList.remove("btn-accent"); el.micToggleBtn.classList.add("btn-danger");
     await startTalking();
   }
