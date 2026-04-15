@@ -1,604 +1,227 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
-    <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="mobile-web-app-capable" content="yes" />
-    <title>PiCar-X Control</title>
-    <link rel="stylesheet" href="/static/styles.css" />
-  </head>
-  <body data-estop="clear" data-mode="manual">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <title>PiCar-X Control</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body data-estop="clear" data-mode="manual">
 
-    <!-- ═══ FLOATING EMERGENCY STOP — ALWAYS VISIBLE ═══ -->
-    <button id="estop-fab" class="estop-fab" title="Emergency Stop">⏻ E-STOP</button>
-
-    <!-- ═══ ESTOP OVERLAY BANNER ═══ -->
-    <div id="estop-banner" class="estop-banner" hidden>
-      <div class="estop-banner-inner">
-        <span>⚠ EMERGENCY STOP ACTIVE — All motors halted</span>
-        <button id="estop-reset-btn" class="btn btn-outline btn-sm">Reset E-Stop</button>
-      </div>
+  <!-- â•â•â• E-STOP BANNER (shown when active) â•â•â• -->
+  <div id="estop-banner" class="estop-banner" hidden>
+    <div class="estop-banner-inner">
+      <span>âš  EMERGENCY STOP ACTIVE â€” All motors halted</span>
+      <button id="estop-reset-btn" class="btn btn-outline btn-sm">Reset</button>
     </div>
+  </div>
 
-    <!-- ═══ APP LAYOUT ═══ -->
-    <div class="app-shell">
+  <!-- â•â•â• APP LAYOUT â•â•â• -->
+  <div class="app-layout">
 
-      <!-- ─── SIDEBAR (desktop) / BOTTOM BAR (mobile) ─── -->
-      <nav class="sidebar" aria-label="Navigation">
-        <div class="sidebar-brand"><span class="brand-dot"></span><span class="brand-text">PiCar-X</span></div>
-        <div class="sidebar-links">
-          <button class="nav-btn active" data-panel="drive" title="Drive">
-            <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M18.92 6.01C18.72 5.42 18.16 5 17.5 5h-11c-.66 0-1.21.42-1.42 1.01L3 12v8c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1h12v1c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-8l-2.08-5.99zM6.5 16c-.83 0-1.5-.67-1.5-1.5S5.67 13 6.5 13s1.5.67 1.5 1.5S7.33 16 6.5 16zm11 0c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zM5 11l1.5-4.5h11L19 11H5z"/></svg>
-            <span>Drive</span>
-          </button>
-          <button class="nav-btn" data-panel="camera" title="Camera">
-            <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z"/></svg>
-            <span>Camera</span>
-          </button>
-          <button class="nav-btn" data-panel="voice" title="Voice">
-            <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.3-3c0 3-2.54 5.1-5.3 5.1S6.7 14 6.7 11H5c0 3.41 2.72 6.23 6 6.72V21h2v-3.28c3.28-.48 6-3.3 6-6.72h-1.7z"/></svg>
-            <span>Voice</span>
-          </button>
-          <button class="nav-btn" data-panel="ai" title="AI / Vision">
-            <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg>
-            <span>AI</span>
-          </button>
-          <button class="nav-btn" data-panel="settings" title="Settings">
-            <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.07.62-.07.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
-            <span>Settings</span>
-          </button>
+    <!-- â”€â”€â”€ TOP BAR â”€â”€â”€ -->
+    <header class="topbar">
+      <div class="topbar-left">
+        <span class="brand"><span class="brand-dot"></span>PiCar-X</span>
+        <div class="topbar-chips">
+          <span class="chip" id="hw-chip" data-tone="neutral">âš™ Loading</span>
+          <span class="chip" id="safety-chip" data-tone="ok">âœ“ Safety OK</span>
+          <span class="chip" id="mode-chip" data-tone="cool">Manual</span>
         </div>
-        <div class="sidebar-footer">
+      </div>
+      <div class="topbar-right">
+        <div class="topbar-chips">
+          <span class="chip" id="mic-chip" data-tone="neutral">ðŸŽ¤ Off</span>
+          <span class="chip" id="voice-chip" data-tone="neutral">ðŸ”‡ Mute</span>
+          <span class="chip" id="detect-chip" data-tone="neutral">ðŸ‘ Idle</span>
+        </div>
+        <span class="conn-indicator">
           <span class="conn-dot" id="conn-dot"></span>
-          <span class="conn-text" id="conn-label">Connecting</span>
-        </div>
-      </nav>
+          <span class="conn-text" id="conn-label">Offline</span>
+        </span>
+        <button id="estop-fab" class="estop-fab" title="Emergency Stop">â» E-STOP</button>
+      </div>
+    </header>
 
-      <!-- ─── MAIN ─── -->
-      <main class="main-area">
+    <!-- â”€â”€â”€ CONTENT: Video + Controls â”€â”€â”€ -->
+    <div class="content">
 
-        <!-- ─── STATUS STRIP ─── -->
-        <header class="status-strip">
-          <div class="strip-left">
-            <span class="chip" id="hw-chip" data-tone="neutral">⚙ Loading</span>
-            <span class="chip" id="mode-chip" data-tone="cool">Manual</span>
-            <span class="chip" id="safety-chip" data-tone="ok">Safety OK</span>
-          </div>
-          <div class="strip-right">
-            <span class="chip" id="mic-chip" data-tone="neutral">🎤 Off</span>
-            <span class="chip" id="voice-chip" data-tone="neutral">🔇 Mute</span>
-            <span class="chip" id="detect-chip" data-tone="neutral">👁 Idle</span>
-          </div>
-        </header>
-
-        <!-- ─── WORKSPACE: VIDEO + PANELS ─── -->
-        <div class="workspace">
-
-          <!-- ── VIDEO (always visible) ── -->
-          <section class="video-section">
-            <div class="video-frame">
-              <img id="video-stream" src="/stream.mjpg" alt="Live camera" />
-              <div class="video-hud">
-                <div class="hud-top-row">
-                  <span class="hud-pill live">● LIVE</span>
-                  <span class="hud-pill" id="hud-person" hidden>👤 Person</span>
-                  <span class="hud-pill" id="hud-auto" hidden>🤖 AUTO</span>
-                </div>
-                <div class="hud-bottom-row">
-                  <span class="hud-data" id="hud-drive">SPD 0 / STR 0</span>
-                  <span class="hud-data" id="hud-cam">PAN 0° / TILT 0°</span>
-                </div>
-              </div>
+      <!-- â”€â”€ LEFT: LIVE VIDEO â”€â”€ -->
+      <section class="video-section">
+        <div class="video-frame">
+          <img id="video-stream" src="/stream.mjpg" alt="Live camera" />
+          <div class="video-hud">
+            <div class="hud-top-row">
+              <span class="hud-pill live">â— LIVE</span>
+              <span class="hud-pill" id="hud-person" hidden>ðŸ‘¤ Person</span>
+              <span class="hud-pill" id="hud-auto" hidden>ðŸ¤– AUTO</span>
             </div>
-            <p class="vision-line" id="vision-summary">Waiting for camera...</p>
+            <div class="hud-bottom-row">
+              <span class="hud-data" id="hud-drive">SPD 0 / STR 0</span>
+              <span class="hud-data" id="hud-cam">PAN 0Â° / TILT 0Â°</span>
+            </div>
+          </div>
+        </div>
+        <p class="vision-line" id="vision-summary">Waiting for camera...</p>
+      </section>
+
+      <!-- â”€â”€ RIGHT: CONTROLS COLUMN â”€â”€ -->
+      <div class="controls-col">
+
+        <!-- â•â•â• DRIVE â€” Always visible â•â•â• -->
+        <section class="card" id="panel-drive">
+          <div class="card-head">
+            <h2>Drive</h2>
+            <span class="badge" id="drive-badge">Stopped</span>
+          </div>
+          <div class="card-body">
+            <div class="dpad-grid">
+              <button class="dpad up" data-speed-sign="1" data-steering="0">â–²</button>
+              <button class="dpad left" data-speed-sign="1" data-steering="-25">â—„</button>
+              <button class="dpad center" data-speed-sign="0" data-steering="0">â– </button>
+              <button class="dpad right" data-speed-sign="1" data-steering="25">â–º</button>
+              <button class="dpad down" data-speed-sign="-1" data-steering="0">â–¼</button>
+            </div>
+            <div class="slider-row">
+              <span>Speed</span>
+              <input id="drive-speed-slider" type="range" min="10" max="100" value="35" />
+              <strong id="drive-speed-value">35%</strong>
+            </div>
+            <button id="stop-btn" class="btn btn-danger btn-full">â¹ STOP</button>
+            <details class="hint"><summary>Keyboard: W A S D</summary><p>Hold to drive. Release to stop.</p></details>
+            <div class="mini-row"><span class="muted">Error:</span> <span id="last-error-label">None</span></div>
+          </div>
+        </section>
+
+        <!-- â•â•â• TAB BAR â•â•â• -->
+        <nav class="tab-bar" role="tablist">
+          <button class="tab active" data-panel="camera" role="tab">Camera</button>
+          <button class="tab" data-panel="voice" role="tab">Voice</button>
+          <button class="tab" data-panel="ai" role="tab">AI / Vision</button>
+          <button class="tab" data-panel="settings" role="tab">Settings</button>
+        </nav>
+
+        <!-- â•â•â• TAB PANELS â•â•â• -->
+        <div class="tab-panels">
+
+          <!-- â”€â”€ CAMERA â”€â”€ -->
+          <section id="panel-camera" class="ctrl-panel">
+            <div class="card-head"><h2>Camera</h2><button id="center-camera-btn" class="btn btn-sm btn-outline">Center</button></div>
+            <div class="dpad-grid cam-dpad">
+              <button id="cam-up" class="dpad up">â–²</button>
+              <button id="cam-left" class="dpad left">â—„</button>
+              <button id="cam-center" class="dpad center">âŠ™</button>
+              <button id="cam-right" class="dpad right">â–º</button>
+              <button id="cam-down" class="dpad down">â–¼</button>
+            </div>
+            <div class="preset-row">
+              <button class="btn btn-xs btn-outline preset-chip" data-pan="-45" data-tilt="0">â—„ Left</button>
+              <button class="btn btn-xs btn-outline preset-chip" data-pan="0" data-tilt="0">Home</button>
+              <button class="btn btn-xs btn-outline preset-chip" data-pan="45" data-tilt="0">Right â–º</button>
+            </div>
+            <div class="slider-row"><span>Pan</span><input id="pan-slider" type="range" min="-70" max="70" value="0" /><strong id="pan-value">0Â°</strong></div>
+            <div class="slider-row"><span>Tilt</span><input id="tilt-slider" type="range" min="-35" max="35" value="0" /><strong id="tilt-value">0Â°</strong></div>
+            <label class="toggle-row"><input id="camera-follow-toggle" type="checkbox" /><span>Auto-follow person</span></label>
           </section>
 
-          <!-- ── PANEL STACK ── -->
-          <div class="panel-stack">
+          <!-- â”€â”€ VOICE & AUDIO â”€â”€ -->
+          <section id="panel-voice" class="ctrl-panel" hidden>
+            <div class="card-head"><h2>Voice &amp; Audio</h2></div>
+            <div class="field-pair">
+              <label class="field"><span>Voice Mode</span><select id="voice-mode-select"><option value="mute">Mute</option><option value="relay">Relay</option><option value="ai_reply">AI Reply</option></select></label>
+              <label class="field"><span>Audio Output</span><select id="audio-target-select"><option value="car">Car</option><option value="browser">Browser</option><option value="both">Both</option></select></label>
+            </div>
+            <div class="mic-box">
+              <div class="mic-header"><span class="section-title">Microphone</span><span class="mic-badge" id="mic-state-badge" data-state="off">Off</span></div>
+              <div class="mic-btns">
+                <button id="mic-toggle-btn" class="btn btn-accent btn-full">ðŸŽ¤ Open Mic</button>
+                <button id="push-to-talk-btn" class="btn btn-outline btn-full" aria-pressed="false">Hold to Talk</button>
+              </div>
+              <label class="toggle-row"><input id="open-mic-toggle" type="checkbox" /><span>Open Mic Mode (stays on until toggled off)</span></label>
+            </div>
+            <div class="slider-row"><span>ðŸ”Š Volume</span><input id="volume-slider" type="range" min="0" max="100" value="80" /><strong id="volume-value">80%</strong></div>
+            <p id="speech-status" class="status-bar" data-tone="neutral">Mic idle. Choose a voice mode to begin.</p>
+            <div class="log-box">
+              <div class="log-head"><span>Conversation</span><span id="message-count-label">0</span></div>
+              <div id="messages" class="messages" aria-live="polite"></div>
+            </div>
+          </section>
 
-            <!-- ═══ DRIVE ═══ -->
-            <section id="panel-drive" class="ctrl-panel">
-              <div class="phead"><h2>Drive</h2><span class="badge" id="drive-badge">Stopped</span></div>
-              <div class="dpad-grid">
-                <button class="dpad up" data-speed-sign="1" data-steering="0">▲</button>
-                <button class="dpad left" data-speed-sign="1" data-steering="-25">◄</button>
-                <button class="dpad center" data-speed-sign="0" data-steering="0">■</button>
-                <button class="dpad right" data-speed-sign="1" data-steering="25">►</button>
-                <button class="dpad down" data-speed-sign="-1" data-steering="0">▼</button>
-              </div>
-              <div class="slider-row">
-                <span>Speed</span>
-                <input id="drive-speed-slider" type="range" min="10" max="100" value="35" />
-                <strong id="drive-speed-value">35%</strong>
-              </div>
-              <button id="stop-btn" class="btn btn-danger btn-full">⏹ STOP</button>
-              <details class="hint"><summary>Keyboard: W A S D</summary><p>Hold to drive. Release to stop. Watchdog catches stale commands.</p></details>
-              <div class="mini-row"><span class="muted">Error:</span><span id="last-error-label">None</span></div>
-            </section>
+          <!-- â”€â”€ AI / VISION â”€â”€ -->
+          <section id="panel-ai" class="ctrl-panel" hidden>
+            <div class="card-head"><h2>AI / Vision</h2></div>
+            <div class="stat-grid">
+              <div class="stat"><span>Person</span><strong id="person-detected-label">No</strong></div>
+              <div class="stat"><span>Provider</span><strong id="ai-provider-label">Loading</strong></div>
+              <div class="stat"><span>Updated</span><strong id="vision-updated-label">Pending</strong></div>
+              <div class="stat"><span>Behavior</span><strong id="last-behavior-label">None</strong></div>
+            </div>
+            <div class="greeting-box"><span class="muted">Last Greeting</span><strong id="last-greeting-label">No greeting yet.</strong></div>
+            <div class="auto-section">
+              <span class="section-title">Autonomous Behaviors</span>
+              <label class="toggle-row"><input id="auto-tracking-toggle" type="checkbox" /><span>Auto-track person</span></label>
+              <label class="toggle-row"><input id="greeting-enabled-toggle" type="checkbox" /><span>Auto-greet on detection</span></label>
+              <label class="field"><span>Greeting Mode</span><select id="greeting-mode-select"><option value="simple_greeting">Simple greeting</option><option value="ai_live_greeting">AI live greeting</option><option value="detect_only">Detect only</option></select></label>
+            </div>
+            <form id="vision-form" class="qa-row"><input id="vision-question" type="text" placeholder="Ask about camera view..." /><button type="submit" class="btn btn-accent">Ask</button></form>
+            <div class="quick-row">
+              <button type="button" class="btn btn-xs btn-outline prompt-chip" data-prompt="What do you see right now?">Scene</button>
+              <button type="button" class="btn btn-xs btn-outline prompt-chip" data-prompt="Is there a person in front of the camera?">Person?</button>
+              <button type="button" class="btn btn-xs btn-outline prompt-chip" data-prompt="Where is the detected face in the frame?">Face Pos</button>
+            </div>
+            <pre id="vision-answer" class="answer-box">No answer yet.</pre>
+          </section>
 
-            <!-- ═══ CAMERA ═══ -->
-            <section id="panel-camera" class="ctrl-panel" hidden>
-              <div class="phead"><h2>Camera</h2><button id="center-camera-btn" class="btn btn-sm">Center</button></div>
-              <div class="dpad-grid cam-dpad">
-                <button id="cam-up" class="dpad up">▲</button>
-                <button id="cam-left" class="dpad left">◄</button>
-                <button id="cam-center" class="dpad center">⊙</button>
-                <button id="cam-right" class="dpad right">►</button>
-                <button id="cam-down" class="dpad down">▼</button>
-              </div>
-              <div class="preset-row">
-                <button class="btn btn-xs preset-chip" data-pan="-45" data-tilt="0">◄ Left</button>
-                <button class="btn btn-xs preset-chip" data-pan="0" data-tilt="0">Home</button>
-                <button class="btn btn-xs preset-chip" data-pan="45" data-tilt="0">Right ►</button>
-              </div>
-              <div class="slider-row"><span>Pan</span><input id="pan-slider" type="range" min="-70" max="70" value="0" /><strong id="pan-value">0°</strong></div>
-              <div class="slider-row"><span>Tilt</span><input id="tilt-slider" type="range" min="-35" max="35" value="0" /><strong id="tilt-value">0°</strong></div>
-              <label class="toggle-row"><input id="camera-follow-toggle" type="checkbox" /><span>Auto-follow person</span></label>
-            </section>
-
-            <!-- ═══ VOICE ═══ -->
-            <section id="panel-voice" class="ctrl-panel" hidden>
-              <div class="phead"><h2>Voice & Audio</h2></div>
-              <div class="field-pair">
-                <label class="field"><span>Voice Mode</span><select id="voice-mode-select"><option value="mute">Mute</option><option value="relay">Relay</option><option value="ai_reply">AI Reply</option></select></label>
-                <label class="field"><span>Audio Output</span><select id="audio-target-select"><option value="car">Car</option><option value="browser">Browser</option><option value="both">Both</option></select></label>
-              </div>
-              <div class="mic-box">
-                <div class="mic-header"><span class="section-title">Microphone</span><span class="mic-badge" id="mic-state-badge" data-state="off">Off</span></div>
-                <div class="mic-btns">
-                  <button id="mic-toggle-btn" class="btn btn-accent btn-full">🎤 Open Mic</button>
-                  <button id="push-to-talk-btn" class="btn btn-outline btn-full" aria-pressed="false">Hold to Talk</button>
+          <!-- â”€â”€ SETTINGS â”€â”€ -->
+          <section id="panel-settings" class="ctrl-panel" hidden>
+            <div class="card-head"><h2>Settings</h2></div>
+            <form id="settings-form" class="settings-form">
+              <details class="sgroup" open>
+                <summary>Greeting &amp; Behavior</summary>
+                <div class="sfields">
+                  <label class="field full"><span>Greeting Text</span><input id="greeting-text-input" type="text" maxlength="160" /></label>
+                  <label class="toggle-row"><input id="greeting-enabled-input" type="checkbox" /><span>Greet on person detection</span></label>
+                  <label class="toggle-row"><input id="auto-tracking-input" type="checkbox" /><span>Auto camera tracking</span></label>
+                  <label class="field"><span>Detection Response</span><select id="settings-greeting-mode"><option value="simple_greeting">Simple greeting</option><option value="ai_live_greeting">AI live greeting</option><option value="detect_only">Detect only</option></select></label>
                 </div>
-                <label class="toggle-row"><input id="open-mic-toggle" type="checkbox" /><span>Open Mic Mode (stays on until toggled off)</span></label>
-              </div>
-              <div class="slider-row"><span>🔊 Volume</span><input id="volume-slider" type="range" min="0" max="100" value="80" /><strong id="volume-value">80%</strong></div>
-              <p id="speech-status" class="status-bar" data-tone="neutral">Mic idle. Choose a voice mode to begin.</p>
-              <div class="log-box">
-                <div class="log-head"><span>Conversation</span><span id="message-count-label">0</span></div>
-                <div id="messages" class="messages" aria-live="polite"></div>
-              </div>
-            </section>
-
-            <!-- ═══ AI / VISION ═══ -->
-            <section id="panel-ai" class="ctrl-panel" hidden>
-              <div class="phead"><h2>AI / Vision</h2></div>
-              <div class="stat-grid">
-                <div class="stat"><span>Person</span><strong id="person-detected-label">No</strong></div>
-                <div class="stat"><span>Provider</span><strong id="ai-provider-label">Loading</strong></div>
-                <div class="stat"><span>Updated</span><strong id="vision-updated-label">Pending</strong></div>
-                <div class="stat"><span>Behavior</span><strong id="last-behavior-label">None</strong></div>
-              </div>
-              <div class="greeting-box"><span class="muted">Last Greeting</span><strong id="last-greeting-label">No greeting yet.</strong></div>
-              <div class="auto-section">
-                <span class="section-title">Autonomous Behaviors</span>
-                <label class="toggle-row"><input id="auto-tracking-toggle" type="checkbox" /><span>Auto-track person</span></label>
-                <label class="toggle-row"><input id="greeting-enabled-toggle" type="checkbox" /><span>Auto-greet on detection</span></label>
-                <label class="field"><span>Greeting Mode</span><select id="greeting-mode-select"><option value="simple_greeting">Simple greeting</option><option value="ai_live_greeting">AI live greeting</option><option value="detect_only">Detect only</option></select></label>
-              </div>
-              <form id="vision-form" class="qa-row"><input id="vision-question" type="text" placeholder="Ask about camera view..." /><button type="submit" class="btn btn-accent">Ask</button></form>
-              <div class="quick-row">
-                <button type="button" class="btn btn-xs prompt-chip" data-prompt="What do you see right now?">Scene</button>
-                <button type="button" class="btn btn-xs prompt-chip" data-prompt="Is there a person in front of the camera?">Person?</button>
-                <button type="button" class="btn btn-xs prompt-chip" data-prompt="Where is the detected face in the frame?">Face Pos</button>
-              </div>
-              <pre id="vision-answer" class="answer-box">No answer yet.</pre>
-            </section>
-
-            <!-- ═══ SETTINGS ═══ -->
-            <section id="panel-settings" class="ctrl-panel" hidden>
-              <div class="phead"><h2>Settings</h2></div>
-              <form id="settings-form" class="settings-form">
-                <details class="sgroup" open>
-                  <summary>Greeting & Behavior</summary>
-                  <div class="sfields">
-                    <label class="field full"><span>Greeting Text</span><input id="greeting-text-input" type="text" maxlength="160" /></label>
-                    <label class="toggle-row"><input id="greeting-enabled-input" type="checkbox" /><span>Greet on person detection</span></label>
-                    <label class="toggle-row"><input id="auto-tracking-input" type="checkbox" /><span>Auto camera tracking</span></label>
-                    <label class="field"><span>Detection Response</span><select id="settings-greeting-mode"><option value="simple_greeting">Simple greeting</option><option value="ai_live_greeting">AI live greeting</option><option value="detect_only">Detect only</option></select></label>
+              </details>
+              <details class="sgroup">
+                <summary>Voice &amp; Audio Defaults</summary>
+                <div class="sfields">
+                  <label class="field"><span>Startup Voice Mode</span><select id="startup-voice-mode-select"><option value="mute">Mute</option><option value="relay">Relay</option><option value="ai_reply">AI Reply</option></select></label>
+                  <label class="field"><span>Startup Audio Target</span><select id="startup-audio-target-select"><option value="car">Car</option><option value="browser">Browser</option><option value="both">Both</option></select></label>
+                </div>
+              </details>
+              <details class="sgroup">
+                <summary>Camera &amp; Tracking</summary>
+                <div class="sfields">
+                  <div class="slider-row"><span>Step Sensitivity</span><input id="camera-step-input" type="range" min="1" max="20" value="5" /><strong id="camera-step-value">5Â°</strong></div>
+                </div>
+              </details>
+              <details class="sgroup">
+                <summary>Safety</summary>
+                <div class="sfields">
+                  <p class="muted">Motor safety, steering/camera limits, and ultrasonic obstacle blocking stay enforced at all times.</p>
+                  <div class="btn-pair">
+                    <button type="button" id="settings-estop-btn" class="btn btn-danger">Emergency Stop</button>
+                    <button type="button" id="settings-reset-btn" class="btn btn-outline">Reset E-Stop</button>
                   </div>
-                </details>
-                <details class="sgroup">
-                  <summary>Voice & Audio Defaults</summary>
-                  <div class="sfields">
-                    <label class="field"><span>Startup Voice Mode</span><select id="startup-voice-mode-select"><option value="mute">Mute</option><option value="relay">Relay</option><option value="ai_reply">AI Reply</option></select></label>
-                    <label class="field"><span>Startup Audio Target</span><select id="startup-audio-target-select"><option value="car">Car</option><option value="browser">Browser</option><option value="both">Both</option></select></label>
-                  </div>
-                </details>
-                <details class="sgroup">
-                  <summary>Camera & Tracking</summary>
-                  <div class="sfields">
-                    <div class="slider-row"><span>Step Sensitivity</span><input id="camera-step-input" type="range" min="1" max="20" value="5" /><strong id="camera-step-value">5°</strong></div>
-                  </div>
-                </details>
-                <details class="sgroup">
-                  <summary>Safety</summary>
-                  <div class="sfields">
-                    <p class="muted">Motor safety, steering/camera limits, and ultrasonic obstacle blocking stay enforced at all times.</p>
-                    <div class="btn-pair">
-                      <button type="button" id="settings-estop-btn" class="btn btn-danger">Emergency Stop</button>
-                      <button type="button" id="settings-reset-btn" class="btn btn-outline">Reset E-Stop</button>
-                    </div>
-                  </div>
-                </details>
-                <div class="save-row">
-                  <button type="submit" class="btn btn-accent btn-full">Save Settings</button>
-                  <p id="settings-save-status" class="status-bar" data-tone="neutral">Not modified.</p>
                 </div>
-              </form>
-            </section>
-          </div><!-- .panel-stack -->
-        </div><!-- .workspace -->
-      </main>
-    </div><!-- .app-shell -->
-
-    <script type="module" src="/static/app.js"></script>
-  </body>
-</html>
-<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>PiCar-X Unified Console</title>
-    <link rel="stylesheet" href="/static/styles.css" />
-  </head>
-  <body>
-    <main class="shell">
-      <section class="hero panel">
-        <div class="hero-copy">
-          <p class="eyebrow">SunFounder PiCar-X</p>
-          <h1>Unified browser cockpit for drive, camera, voice, and live robot status.</h1>
-          <p class="subtitle">
-            Safety-guarded control for Raspberry Pi 5 with live video, browser voice relay,
-            Gemini-backed replies, and configurable person-follow greeting behavior.
-          </p>
-        </div>
-
-        <div class="status-grid">
-          <article class="status-card" data-tone="neutral">
-            <span>Updated</span>
-            <strong id="session-updated-label">Syncing...</strong>
-          </article>
-          <article class="status-card" data-tone="neutral">
-            <span>Drive</span>
-            <strong id="drive-state-label">0 spd / 0 str</strong>
-          </article>
-          <article class="status-card" data-tone="neutral">
-            <span>Camera</span>
-            <strong id="camera-state-label">P 0deg / T 0deg</strong>
-          </article>
-          <article class="status-card" data-tone="ok">
-            <span>Safety</span>
-            <strong id="estop-label">Clear</strong>
-          </article>
-          <article class="status-card" data-tone="cool">
-            <span>Voice Mode</span>
-            <strong id="voice-mode-label">Mute</strong>
-          </article>
-          <article class="status-card" data-tone="cool">
-            <span>Audio Target</span>
-            <strong id="audio-target-label">Car</strong>
-          </article>
-          <article class="status-card" data-tone="neutral">
-            <span>Hardware</span>
-            <strong id="hardware-label">Loading</strong>
-          </article>
-          <article class="status-card" data-tone="neutral">
-            <span>System</span>
-            <strong id="system-status-label">Connecting</strong>
-          </article>
-        </div>
-      </section>
-
-      <nav class="tab-strip panel" aria-label="Control sections">
-        <button type="button" class="tab-button" data-tab-button="drive">Drive</button>
-        <button type="button" class="tab-button" data-tab-button="camera">Camera</button>
-        <button type="button" class="tab-button" data-tab-button="voice">Voice</button>
-        <button type="button" class="tab-button" data-tab-button="ai">AI / Vision</button>
-        <button type="button" class="tab-button" data-tab-button="settings">Settings</button>
-      </nav>
-
-      <section class="tab-panels">
-        <section id="tab-drive" class="tab-panel panel">
-          <div class="panel-header">
-            <div>
-              <p class="section-kicker">Manual Motion</p>
-              <h2>Drive Control</h2>
-            </div>
-            <div class="button-row">
-              <button id="stop-btn" class="danger">Emergency Stop</button>
-              <button id="clear-estop-btn" class="secondary">Reset E-Stop</button>
-            </div>
-          </div>
-
-          <div class="drive-layout">
-            <div class="drive-pad">
-              <button class="drive drive-forward" data-speed-sign="1" data-steering="0">
-                <span class="drive-arrow">&uarr;</span>
-                <span>Forward</span>
-              </button>
-              <button class="drive drive-left" data-speed-sign="1" data-steering="-25">
-                <span class="drive-arrow">&larr;</span>
-                <span>Left</span>
-              </button>
-              <button class="drive drive-stop neutral" data-speed-sign="0" data-steering="0">
-                <span class="drive-arrow">&middot;</span>
-                <span>Stop</span>
-              </button>
-              <button class="drive drive-right" data-speed-sign="1" data-steering="25">
-                <span class="drive-arrow">&rarr;</span>
-                <span>Right</span>
-              </button>
-              <button class="drive drive-reverse" data-speed-sign="-1" data-steering="0">
-                <span class="drive-arrow">&darr;</span>
-                <span>Reverse</span>
-              </button>
-            </div>
-
-            <aside class="stack">
-              <label class="range-field">
-                <div class="field-head">
-                  <span>Drive Speed</span>
-                  <strong id="drive-speed-value">35%</strong>
-                </div>
-                <input id="drive-speed-slider" type="range" min="10" max="100" value="35" />
-              </label>
-
-              <article class="info-card">
-                <span>Keyboard Control</span>
-                <strong>W A S D</strong>
-                <p>
-                  Hold a button or key to keep the command alive. Releasing stops the command,
-                  and the backend watchdog still catches stale motion.
-                </p>
-              </article>
-
-              <article class="info-card">
-                <span>Motion Summary</span>
-                <strong id="drive-summary-label">Stopped</strong>
-                <p id="last-error-label">No active error.</p>
-              </article>
-            </aside>
-          </div>
-        </section>
-
-        <section id="tab-camera" class="tab-panel panel">
-          <div class="panel-header">
-            <div>
-              <p class="section-kicker">Optics and Tracking</p>
-              <h2>Camera Control</h2>
-            </div>
-            <div class="button-row">
-              <button id="center-camera-btn" class="secondary">Center Camera</button>
-              <button id="refresh-btn" class="secondary">Refresh State</button>
-            </div>
-          </div>
-
-          <div class="camera-layout">
-            <div class="video-frame">
-              <img id="video-stream" src="/stream.mjpg" alt="PiCar-X live camera stream" />
-              <div class="video-overlay">
-                <span class="overlay-chip">Live Stream</span>
-                <p id="vision-summary" class="overlay-summary">Waiting for camera summary...</p>
+              </details>
+              <div class="save-row">
+                <button type="submit" class="btn btn-accent btn-full">Save Settings</button>
+                <p id="settings-save-status" class="status-bar" data-tone="neutral">Not modified.</p>
               </div>
-            </div>
+            </form>
+          </section>
 
-            <div class="stack">
-              <div class="camera-pad">
-                <button id="camera-up-btn" class="secondary">Up</button>
-                <button id="camera-left-btn" class="secondary">Left</button>
-                <button id="camera-center-btn" class="secondary">Center</button>
-                <button id="camera-right-btn" class="secondary">Right</button>
-                <button id="camera-down-btn" class="secondary">Down</button>
-              </div>
+        </div><!-- .tab-panels -->
+      </div><!-- .controls-col -->
+    </div><!-- .content -->
+  </div><!-- .app-layout -->
 
-              <div class="preset-row">
-                <button type="button" class="preset-chip" data-pan="-45" data-tilt="0">Look Left</button>
-                <button type="button" class="preset-chip" data-pan="0" data-tilt="0">Home</button>
-                <button type="button" class="preset-chip" data-pan="45" data-tilt="0">Look Right</button>
-              </div>
-
-              <label class="toggle-field">
-                <input id="camera-follow-toggle" type="checkbox" />
-                <span>Follow detected person automatically</span>
-              </label>
-
-              <label class="range-field">
-                <div class="field-head">
-                  <span>Pan</span>
-                  <strong id="pan-value">0deg</strong>
-                </div>
-                <input id="pan-slider" type="range" min="-70" max="70" value="0" />
-              </label>
-
-              <label class="range-field">
-                <div class="field-head">
-                  <span>Tilt</span>
-                  <strong id="tilt-value">0deg</strong>
-                </div>
-                <input id="tilt-slider" type="range" min="-35" max="35" value="0" />
-              </label>
-
-              <article class="info-card">
-                <span>Tracking Step</span>
-                <strong id="camera-step-badge">5deg</strong>
-                <p>The manual move buttons and person-centering loop both use this safe step size.</p>
-              </article>
-            </div>
-          </div>
-        </section>
-
-        <section id="tab-voice" class="tab-panel panel">
-          <div class="panel-header">
-            <div>
-              <p class="section-kicker">Speech and Routing</p>
-              <h2>Voice Modes</h2>
-            </div>
-          </div>
-
-          <div class="two-col">
-            <label>
-              <span>Voice Mode</span>
-              <select id="voice-mode-select">
-                <option value="mute">Mute</option>
-                <option value="relay">Relay</option>
-                <option value="ai_reply">AI Reply</option>
-              </select>
-            </label>
-
-            <label>
-              <span>Audio Output</span>
-              <select id="audio-target-select">
-                <option value="car">Car speaker</option>
-                <option value="browser">Computer speaker</option>
-                <option value="both">Both</option>
-              </select>
-            </label>
-          </div>
-
-          <button id="push-to-talk-btn" class="accent talk-button" aria-pressed="false">
-            <span>Hold To Talk</span>
-            <small>Relay your mic live or capture a full AI turn from the browser.</small>
-          </button>
-
-          <p id="speech-status" class="status-banner" data-tone="neutral" aria-live="polite">
-            Microphone is idle. Choose Relay or AI Reply to open the voice path.
-          </p>
-
-          <div class="log-header">
-            <span>Conversation Log</span>
-            <span id="message-count-label">0 entries</span>
-          </div>
-          <div id="messages" class="messages" aria-live="polite"></div>
-        </section>
-
-        <section id="tab-ai" class="tab-panel panel">
-          <div class="panel-header">
-            <div>
-              <p class="section-kicker">Scene Intelligence</p>
-              <h2>AI / Vision</h2>
-            </div>
-          </div>
-
-          <div class="status-grid compact">
-            <article class="status-card" data-tone="neutral">
-              <span>Person Visible</span>
-              <strong id="person-detected-label">Unknown</strong>
-            </article>
-            <article class="status-card" data-tone="cool">
-              <span>Vision Updated</span>
-              <strong id="vision-updated-label">Pending</strong>
-            </article>
-            <article class="status-card" data-tone="cool">
-              <span>AI Provider</span>
-              <strong id="ai-provider-label">Loading</strong>
-            </article>
-            <article class="status-card" data-tone="neutral">
-              <span>Behavior</span>
-              <strong id="last-behavior-label">No behavior event yet</strong>
-            </article>
-          </div>
-
-          <article class="info-card wide">
-            <span>Last Greeting</span>
-            <strong id="last-greeting-label">No greeting delivered yet.</strong>
-          </article>
-
-          <form id="vision-form" class="stack">
-            <label>
-              <span>Ask About The Camera View</span>
-              <input id="vision-question" type="text" placeholder="What do you see right now?" />
-            </label>
-            <button type="submit" class="accent">Ask Vision</button>
-          </form>
-
-          <div class="quick-prompts">
-            <button type="button" class="prompt-chip" data-prompt="What do you see right now?">Scene</button>
-            <button type="button" class="prompt-chip" data-prompt="Is there a person in front of the camera?">Person</button>
-            <button type="button" class="prompt-chip" data-prompt="Where is the detected face in the frame?">Locate Face</button>
-          </div>
-
-          <pre id="vision-answer" class="answer-box">No answer yet.</pre>
-        </section>
-
-        <section id="tab-settings" class="tab-panel panel">
-          <div class="panel-header">
-            <div>
-              <p class="section-kicker">Robot Preferences</p>
-              <h2>Settings</h2>
-            </div>
-          </div>
-
-          <form id="settings-form" class="settings-grid">
-            <label class="full-row">
-              <span>Editable Greeting Text</span>
-              <input id="greeting-text-input" type="text" maxlength="160" />
-            </label>
-
-            <label class="toggle-field">
-              <input id="greeting-enabled-input" type="checkbox" />
-              <span>Enable automatic greeting when a person is detected</span>
-            </label>
-
-            <label class="toggle-field">
-              <input id="auto-tracking-input" type="checkbox" />
-              <span>Enable automatic camera turn-toward-person tracking</span>
-            </label>
-
-            <label>
-              <span>Person Detection Response</span>
-              <select id="greeting-mode-select">
-                <option value="simple_greeting">Simple greeting only</option>
-                <option value="ai_live_greeting">Start AI live greeting</option>
-                <option value="detect_only">Detection only, no speech</option>
-              </select>
-            </label>
-
-            <label>
-              <span>Startup Voice Mode</span>
-              <select id="startup-voice-mode-select">
-                <option value="mute">Mute</option>
-                <option value="relay">Relay</option>
-                <option value="ai_reply">AI Reply</option>
-              </select>
-            </label>
-
-            <label>
-              <span>Startup Audio Target</span>
-              <select id="startup-audio-target-select">
-                <option value="car">Car speaker</option>
-                <option value="browser">Computer speaker</option>
-                <option value="both">Both</option>
-              </select>
-            </label>
-
-            <label>
-              <div class="field-head">
-                <span>Camera Step / Tracking Sensitivity</span>
-                <strong id="camera-step-value">5deg</strong>
-              </div>
-              <input id="camera-step-input" type="range" min="1" max="20" value="5" />
-            </label>
-
-            <article class="info-card">
-              <span>Safety Notes</span>
-              <strong>Motor safety stays enforced</strong>
-              <p>
-                Emergency stop, steering limits, camera limits, and ultrasonic forward-motion blocking
-                remain active regardless of AI or greeting settings.
-              </p>
-            </article>
-
-            <div class="full-row button-row">
-              <button id="save-settings-btn" type="submit" class="accent">Save Settings</button>
-              <p id="settings-save-status" class="status-banner" data-tone="neutral">Settings not modified yet.</p>
-            </div>
-          </form>
-        </section>
-      </section>
-    </main>
-
-    <script type="module" src="/static/app.js"></script>
-  </body>
+  <script type="module" src="/static/app.js"></script>
+</body>
 </html>
