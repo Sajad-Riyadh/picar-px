@@ -71,25 +71,14 @@ class PicarxAdapter:
     def _init_hardware(self) -> Any:
         if self._config.use_mock_hardware:
             return MockPicarx()
-        # lgpio creates notification files in CWD; ensure it's writable
-        import os
-        try:
-            os.chdir(os.path.expanduser("~"))
-        except OSError:
-            pass
-        try:
-            from picarx import Picarx
-
-            hw = Picarx()
-            logger.info("Picarx hardware initialized on first attempt")
-            return hw
-        except Exception as exc:
-            logger.warning(
-                "Initial Picarx init failed: %s — starting with MockPicarx, "
-                "will keep retrying in background",
-                exc,
-            )
-            return MockPicarx()
+        # Never attempt real hardware in-process on startup — a failed Picarx()
+        # leaks GPIO handles via gpiozero, blocking all future attempts.
+        # Background subprocess probe will swap in real hardware once ready.
+        logger.info(
+            "Starting with MockPicarx — background probe will swap in real "
+            "hardware once I2C/GPIO are ready"
+        )
+        return MockPicarx()
 
     def _retry_hardware_in_background(self) -> None:
         """Probe readiness in a subprocess to avoid leaking GPIO handles."""
