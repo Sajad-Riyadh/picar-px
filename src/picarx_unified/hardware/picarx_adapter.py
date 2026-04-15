@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import logging
 import threading
+import time
 from dataclasses import dataclass
 from typing import Any
 
 from ..config import AppConfig
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -60,12 +64,22 @@ class PicarxAdapter:
     def _build_hardware(self) -> Any:
         if self._config.use_mock_hardware:
             return MockPicarx()
-        try:
-            from picarx import Picarx
+        max_retries = 5
+        for attempt in range(1, max_retries + 1):
+            try:
+                from picarx import Picarx
 
-            return Picarx()
-        except Exception:
-            return MockPicarx()
+                hw = Picarx()
+                logger.info("Picarx hardware initialized (attempt %d)", attempt)
+                return hw
+            except Exception as exc:
+                logger.warning(
+                    "Picarx init attempt %d/%d failed: %s", attempt, max_retries, exc
+                )
+                if attempt < max_retries:
+                    time.sleep(3)
+        logger.error("All Picarx init attempts failed — falling back to MockPicarx")
+        return MockPicarx()
 
     def drive(self, speed: int, steering: int) -> None:
         with self._lock:
