@@ -71,6 +71,12 @@ class PicarxAdapter:
     def _init_hardware(self) -> Any:
         if self._config.use_mock_hardware:
             return MockPicarx()
+        # lgpio creates notification files in CWD; ensure it's writable
+        import os
+        try:
+            os.chdir(os.path.expanduser("~"))
+        except OSError:
+            pass
         try:
             from picarx import Picarx
 
@@ -87,17 +93,22 @@ class PicarxAdapter:
 
     def _retry_hardware_in_background(self) -> None:
         """Probe readiness in a subprocess to avoid leaking GPIO handles."""
+        import os
+
         max_retries = 60  # 60 × 5 s = up to 5 minutes
         probe_cmd = [
             sys.executable, "-c",
             "from picarx import Picarx; Picarx(); print('READY')",
         ]
+        # Ensure subprocess inherits a sane environment (HOME is critical for lgpio)
+        probe_env = os.environ.copy()
+        probe_env.setdefault("HOME", os.path.expanduser("~"))
         for attempt in range(1, max_retries + 1):
             time.sleep(5)
-            # Subprocess probe — keeps GPIO leaks out of our process
             try:
                 result = subprocess.run(
                     probe_cmd, capture_output=True, text=True, timeout=30,
+                    env=probe_env, cwd=probe_env.get("HOME", "/tmp"),
                 )
             except subprocess.TimeoutExpired:
                 logger.warning("Background Picarx probe %d/%d timed out", attempt, max_retries)

@@ -10,9 +10,10 @@ Group=car
 SupplementaryGroups=i2c gpio spi dialout video render
 WorkingDirectory=/home/car/picar-px
 Environment=PATH=/home/car/picar-px/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=HOME=/home/car
 Environment=PICARX_HOST=0.0.0.0
 Environment=PICARX_PORT=8080
-Environment=GPIOZERO_PIN_FACTORY=lgpio
+ExecStartPre=/bin/bash -c 'until i2cdetect -y 1 >/dev/null 2>&1; do sleep 2; done'
 ExecStart=/home/car/picar-px/.venv/bin/python -m picarx_unified
 Restart=on-failure
 RestartSec=5
