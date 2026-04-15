@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+import subprocess
+import sys
 import threading
 import time
 from dataclasses import dataclass
@@ -84,9 +86,29 @@ class PicarxAdapter:
             return MockPicarx()
 
     def _retry_hardware_in_background(self) -> None:
+        """Probe readiness in a subprocess to avoid leaking GPIO handles."""
         max_retries = 60  # 60 × 5 s = up to 5 minutes
+        probe_cmd = [
+            sys.executable, "-c",
+            "from picarx import Picarx; Picarx(); print('READY')",
+        ]
         for attempt in range(1, max_retries + 1):
             time.sleep(5)
+            # Subprocess probe — keeps GPIO leaks out of our process
+            try:
+                result = subprocess.run(
+                    probe_cmd, capture_output=True, text=True, timeout=30,
+                )
+            except subprocess.TimeoutExpired:
+                logger.warning("Background Picarx probe %d/%d timed out", attempt, max_retries)
+                continue
+            if "READY" not in (result.stdout or ""):
+                last_line = (result.stderr or "").strip().rsplit("\n", 1)[-1]
+                logger.warning(
+                    "Background Picarx probe %d/%d: %s", attempt, max_retries, last_line
+                )
+                continue
+            # Probe succeeded — I2C and GPIO confirmed ready
             try:
                 from picarx import Picarx
 
@@ -99,12 +121,10 @@ class PicarxAdapter:
                 )
                 return
             except Exception as exc:
-                logger.warning(
-                    "Background Picarx init attempt %d/%d: %s",
-                    attempt,
-                    max_retries,
-                    exc,
+                logger.error(
+                    "Picarx probe succeeded but in-process init failed: %s", exc
                 )
+                return
         logger.error(
             "All background Picarx init attempts failed — staying with MockPicarx"
         )

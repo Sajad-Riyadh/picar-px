@@ -12,6 +12,7 @@ WorkingDirectory=/home/car/picar-px
 Environment=PATH=/home/car/picar-px/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 Environment=PICARX_HOST=0.0.0.0
 Environment=PICARX_PORT=8080
+Environment=GPIOZERO_PIN_FACTORY=lgpio
 ExecStart=/home/car/picar-px/.venv/bin/python -m picarx_unified
 Restart=on-failure
 RestartSec=5
