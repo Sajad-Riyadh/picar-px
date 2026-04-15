@@ -5,9 +5,8 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=car
-Group=car
-SupplementaryGroups=i2c gpio spi dialout video render
+User=root
+Group=root
 WorkingDirectory=/home/car/picar-px
 Environment=PATH=/home/car/picar-px/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 Environment=HOME=/home/car
