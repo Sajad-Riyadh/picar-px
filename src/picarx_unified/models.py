@@ -57,24 +57,24 @@ class SettingsState(BaseModel):
     greeting_mode: GreetingMode = GreetingMode.SIMPLE
     auto_tracking_enabled: bool = True
     camera_step_degrees: int = Field(default=5, ge=1, le=20)
-    camera_red_gain: float = Field(default=1.35, ge=0.5, le=1.8)
+    camera_red_gain: float = Field(default=1.0, ge=0.5, le=1.8)
     camera_green_gain: float = Field(default=1.0, ge=0.5, le=1.8)
-    camera_blue_gain: float = Field(default=0.82, ge=0.5, le=1.8)
+    camera_blue_gain: float = Field(default=1.0, ge=0.5, le=1.8)
     startup_voice_mode: VoiceMode = VoiceMode.MUTE
     startup_audio_target: AudioTarget = AudioTarget.CAR
 
 
 class SettingsUpdateRequest(BaseModel):
-    greeting_text: str = Field(min_length=1, max_length=160)
-    greeting_enabled: bool
-    greeting_mode: GreetingMode
-    auto_tracking_enabled: bool
-    camera_step_degrees: int = Field(ge=1, le=20)
-    camera_red_gain: float = Field(ge=0.5, le=1.8)
-    camera_green_gain: float = Field(ge=0.5, le=1.8)
-    camera_blue_gain: float = Field(ge=0.5, le=1.8)
-    startup_voice_mode: VoiceMode
-    startup_audio_target: AudioTarget
+    greeting_text: str | None = Field(default=None, min_length=1, max_length=160)
+    greeting_enabled: bool | None = None
+    greeting_mode: GreetingMode | None = None
+    auto_tracking_enabled: bool | None = None
+    camera_step_degrees: int | None = Field(default=None, ge=1, le=20)
+    camera_red_gain: float | None = Field(default=None, ge=0.5, le=1.8)
+    camera_green_gain: float | None = Field(default=None, ge=0.5, le=1.8)
+    camera_blue_gain: float | None = Field(default=None, ge=0.5, le=1.8)
+    startup_voice_mode: VoiceMode | None = None
+    startup_audio_target: AudioTarget | None = None
 
 
 class DriveState(BaseModel):

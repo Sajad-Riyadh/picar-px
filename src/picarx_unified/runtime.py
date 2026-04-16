@@ -112,7 +112,10 @@ class RobotRuntime:
         return self._publish_state()
 
     def update_settings(self, request: SettingsUpdateRequest) -> RobotSession:
-        settings = SettingsState(**request.model_dump())
+        current_settings = self.store.load().settings
+        payload = current_settings.model_dump()
+        payload.update(request.model_dump(exclude_unset=True, exclude_none=True))
+        settings = SettingsState(**payload)
 
         def mutate(state: RobotSession) -> None:
             state.settings = settings
