@@ -108,7 +108,7 @@ class CameraService:
                 configuration = self._picamera.create_video_configuration(
                     main={
                         "size": (self._config.camera_width, self._config.camera_height),
-                        "format": "BGR888",
+                        "format": "RGB888",
                     }
                 )
                 self._picamera.configure(configuration)
@@ -130,14 +130,29 @@ class CameraService:
     def _capture_frame(self) -> np.ndarray | None:
         if self._picamera is not None:
             try:
-                return self._picamera.capture_array()
+                frame = self._picamera.capture_array()
+                if cv2 is None:
+                    return frame
+                frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                return self._balance_white(frame)
             except Exception:
                 return None
         if self._camera is not None:
             ok, frame = self._camera.read()
             if ok:
-                return frame
+                return self._balance_white(frame)
         return None
+
+    def _balance_white(self, frame: np.ndarray) -> np.ndarray:
+        if frame.ndim != 3 or frame.shape[2] != 3:
+            return frame
+        channel_means = frame.reshape(-1, 3).mean(axis=0)
+        overall_mean = float(channel_means.mean())
+        if overall_mean <= 0:
+            return frame
+        gains = np.clip(overall_mean / np.maximum(channel_means, 1.0), 0.75, 1.35)
+        balanced = frame.astype(np.float32) * gains.reshape(1, 1, 3)
+        return np.clip(balanced, 0, 255).astype(np.uint8)
 
     def _placeholder_frame(self) -> np.ndarray:
         frame = np.zeros((self._config.camera_height, self._config.camera_width, 3), dtype=np.uint8)
