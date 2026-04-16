@@ -567,7 +567,8 @@ function buildDriveCommand(speedSign, steering, source) {
 async function sendDriveFast(cmd) {
   // Fire-and-forget: send to hardware immediately, update HUD locally
   // Uses /api/drive/fast which skips disk fsync + WebSocket broadcast
-  api(ENDPOINTS.driveFast ?? ENDPOINTS.drive, { method: "POST", json: cmd }).catch(() => null);
+  api(ENDPOINTS.driveFast ?? ENDPOINTS.drive, { method: "POST", json: cmd })
+    .catch(err => { if (el.lastErrorLabel) el.lastErrorLabel.textContent = err.message; });
   // Optimistic local HUD update — no await, no full render
   if (el.hudDrive) el.hudDrive.textContent = `SPD ${signed(cmd.speed)} / STR ${signed(cmd.steering)}`;
   if (el.driveBadge) {
@@ -759,8 +760,8 @@ async function init() {
   registerGlobalCleanup();
   wireSettingsDirtyTracking();
 
-  // ── Initial state
-  await refreshState();
+  // ── Initial state (non-blocking — controls must work even if backend is slow)
+  refreshState().catch(() => null);
 
   // ── Voice socket
   openVoiceSocket().catch(err => { setSpeechStatus(err.message, "danger"); logMessage("system", "Voice link will reconnect on next use."); });
