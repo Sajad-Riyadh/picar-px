@@ -149,6 +149,14 @@ function cacheDom() {
   el.settingsEstopBtn         = $("#settings-estop-btn");
   el.settingsResetBtn         = $("#settings-reset-btn");
   el.settingsSaveStatus       = $("#settings-save-status");
+
+  // Drawer
+  el.menuBtn        = $("#menu-btn");
+  el.drawer         = $("#drawer");
+  el.drawerBackdrop = $("#drawer-backdrop");
+  el.drawerClose    = $("#drawer-close");
+  el.drawerToggle   = $("#drawer-toggle");
+  el.quickMicBtn    = $("#quick-mic-btn");
 }
 
 /* ══════════════════════════════════════════
@@ -272,6 +280,11 @@ function showPanel(name) {
   el.tabs.forEach(t => t.classList.toggle("active", t.dataset.panel === name));
   el.tabPanels.forEach(p => { p.hidden = p.id !== `panel-${name}`; });
 }
+
+/* ── Drawer ── */
+function openDrawer()  { el.drawer.classList.add("open"); el.drawerBackdrop.classList.add("open"); }
+function closeDrawer() { el.drawer.classList.remove("open"); el.drawerBackdrop.classList.remove("open"); }
+function toggleDrawer(){ el.drawer.classList.contains("open") ? closeDrawer() : openDrawer(); }
 
 /* ══════════════════════════════════════════
    STATE RENDER
@@ -696,6 +709,16 @@ async function init() {
 
   // ── Tab navigation (Drive is always visible, not a tab)
   el.tabs.forEach(t => t.addEventListener("click", () => showPanel(t.dataset.panel)));
+
+  // ── Drawer
+  el.menuBtn.addEventListener("click", toggleDrawer);
+  el.drawerToggle.addEventListener("click", toggleDrawer);
+  el.drawerClose.addEventListener("click", closeDrawer);
+  el.drawerBackdrop.addEventListener("click", closeDrawer);
+  window.addEventListener("keydown", ev => { if (ev.key === "Escape") closeDrawer(); });
+
+  // ── Quick mic (main screen shortcut)
+  el.quickMicBtn.addEventListener("click", () => toggleOpenMic());
 
   // ── Drive buttons
   el.dpadBtns.forEach(b => { setButtonActive(b, false); bindDriveButton(b); });
