@@ -6,9 +6,10 @@
    ═══════════════════════════════════════════════════ */
 
 const CONFIG = {
-  driveRepeatMs: 250,
+  driveRepeatMs: 200,
   refreshIntervalMs: 2500,
   maxMessages: 24,
+  wsRenderThrottleMs: 500,
 };
 
 const ENDPOINTS = {
@@ -16,6 +17,7 @@ const ENDPOINTS = {
   settings: "/api/settings",
   health: "/api/health",
   drive: "/api/drive",
+  driveFast: "/api/drive/fast",
   driveStop: "/api/drive/stop",
   camera: "/api/camera",
   voiceMode: "/api/voice/mode",
@@ -46,8 +48,10 @@ const app = {
   transcript: "",
   driveInterval: null,
   driveCommand: null,
+  driveBusy: false,
   activeDriveButton: null,
   activeKey: null,
+  lastWsRender: 0,
   refreshPromise: null,
   refreshQueued: false,
   volume: 80,
@@ -368,6 +372,8 @@ function renderHealth(health) {
 }
 
 async function refreshState() {
+  // Skip refresh while actively driving to avoid lock contention on the Pi
+  if (app.driveCommand) return;
   if (app.refreshPromise) { app.refreshQueued = true; return app.refreshPromise; }
   app.refreshPromise = (async () => {
     const [session, health] = await Promise.all([api(ENDPOINTS.state), api(ENDPOINTS.health)]);
@@ -450,7 +456,14 @@ function closeVoiceSocket(reason = "Client closing") {
 }
 
 function handleVoiceSocketMessage(payload) {
-  if (payload.type === "state")           { render(payload.state); return; }
+  if (payload.type === "state") {
+    // Throttle full renders during active driving to avoid jank
+    const now = performance.now();
+    if (app.driveCommand && (now - app.lastWsRender) < CONFIG.wsRenderThrottleMs) return;
+    app.lastWsRender = now;
+    render(payload.state);
+    return;
+  }
   if (payload.type === "relay_chunk")     { playRelayChunk(payload.audio, payload.sample_rate).catch(() => null); return; }
   if (payload.type === "assistant_audio") { app.awaitingReply = false; setSpeechStatus("Assistant audio ready.", "ok"); playAssistantAudio(payload.audio).catch(() => null); return; }
   if (payload.type === "assistant_reply") { app.awaitingReply = false; setSpeechStatus("Assistant reply received.", "ok"); logMessage("robot", payload.text); return; }
@@ -551,10 +564,21 @@ function buildDriveCommand(speedSign, steering, source) {
   return { speed: currentDriveSpeed() * speedSign, steering, source };
 }
 
-async function sendDriveCommand(cmd) { return applySessionAction(ENDPOINTS.drive, cmd); }
+async function sendDriveFast(cmd) {
+  // Fire-and-forget: send to hardware immediately, update HUD locally
+  // Uses /api/drive/fast which skips disk fsync + WebSocket broadcast
+  api(ENDPOINTS.driveFast ?? ENDPOINTS.drive, { method: "POST", json: cmd }).catch(() => null);
+  // Optimistic local HUD update — no await, no full render
+  if (el.hudDrive) el.hudDrive.textContent = `SPD ${signed(cmd.speed)} / STR ${signed(cmd.steering)}`;
+  if (el.driveBadge) {
+    el.driveBadge.textContent = cmd.speed === 0 ? "Stopped"
+      : `${cmd.speed > 0 ? "Fwd" : "Rev"} ${Math.abs(cmd.speed)}${cmd.steering ? " / str " + signed(cmd.steering) : ""}`;
+  }
+}
 
 function clearDriveLoop() {
-  clearInterval(app.driveInterval); app.driveInterval = null; app.driveCommand = null;
+  clearTimeout(app.driveInterval); app.driveInterval = null; app.driveCommand = null;
+  app.driveBusy = false;
   if (app.activeDriveButton) { setButtonActive(app.activeDriveButton, false); app.activeDriveButton = null; }
 }
 
@@ -570,12 +594,21 @@ async function startDriveLoop(command, button = null) {
   if (app.driveCommand && app.driveCommand.speed === command.speed && app.driveCommand.steering === command.steering && app.driveCommand.source === command.source) return;
   clearDriveLoop(); app.driveCommand = command;
   if (button) { app.activeDriveButton = button; setButtonActive(button, true); }
-  try {
-    await sendDriveCommand(command);
-    app.driveInterval = setInterval(() => {
-      sendDriveCommand(command).catch(err => { clearDriveLoop(); setSpeechStatus(err.message, "danger"); api(ENDPOINTS.driveStop, { method: "POST" }).catch(() => null); });
-    }, CONFIG.driveRepeatMs);
-  } catch (err) { clearDriveLoop(); setSpeechStatus(err.message, "danger"); }
+  // Sequential drive loop: waits for each command before scheduling the next
+  const tick = async () => {
+    if (!app.driveCommand) return;
+    app.driveBusy = true;
+    try {
+      await sendDriveFast(command);
+    } catch (err) {
+      clearDriveLoop(); setSpeechStatus(err.message, "danger");
+      api(ENDPOINTS.driveStop, { method: "POST" }).catch(() => null);
+      return;
+    }
+    app.driveBusy = false;
+    if (app.driveCommand) app.driveInterval = setTimeout(tick, CONFIG.driveRepeatMs);
+  };
+  tick();
 }
 
 /* ══════════════════════════════════════════

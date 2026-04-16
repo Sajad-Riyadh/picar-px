@@ -141,6 +141,28 @@ class RobotRuntime:
         )
         return self._publish_state()
 
+    def apply_drive_fast(self, request: DriveRequest) -> dict:
+        """Lightweight drive path: skips fsync and WebSocket broadcast.
+        Returns minimal ack instead of full RobotSession."""
+        session = self.store.load()
+        distance = self.hardware.get_distance()
+        safe = self.guard.sanitize_drive(
+            request,
+            emergency_stop=session.emergency_stop,
+            distance_cm=distance,
+        )
+        self.hardware.drive(safe.speed, safe.steering)
+        self._last_drive_command_monotonic = time.monotonic()
+        self.store.fast_update(
+            lambda state: self._update_drive_state(
+                state,
+                speed=safe.speed,
+                steering=safe.steering,
+                error=None,
+            )
+        )
+        return {"speed": safe.speed, "steering": safe.steering}
+
     def stop_drive(self, *, error: str | None = None) -> RobotSession:
         self.hardware.stop()
         self.store.update(lambda state: self._update_drive_state(state, speed=0, steering=0, error=error))

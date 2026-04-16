@@ -57,6 +57,16 @@ class StateStore:
             self._write_locked(session)
             return session
 
+    def fast_update(self, mutate: Callable[[RobotSession], None]) -> RobotSession:
+        """Update state with a quick write (no fsync). Used for high-frequency
+        drive commands where durability is not critical."""
+        with self._lock:
+            session = self._load_locked()
+            mutate(session)
+            session.updated_at = utc_now()
+            self._write_fast_locked(session)
+            return session
+
     def _load_locked(self) -> RobotSession:
         if not self._path.exists():
             return RobotSession()
@@ -88,3 +98,9 @@ class StateStore:
             self._path,
             json.dumps(session.model_dump(mode="json"), indent=2, sort_keys=True),
         )
+
+    def _write_fast_locked(self, session: RobotSession) -> None:
+        """Write state without fsync — much faster on SD cards."""
+        content = json.dumps(session.model_dump(mode="json"), indent=2, sort_keys=True)
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        self._path.write_text(content, encoding="utf-8")

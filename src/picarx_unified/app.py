@@ -87,6 +87,21 @@ def create_app() -> FastAPI:
             runtime.record_error(str(exc))
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
+    @app.post("/api/drive/fast")
+    async def drive_fast(
+        request: Request,
+        command: DriveRequest,
+        _: None = Depends(_authorize),
+    ):
+        """Lightweight drive endpoint: skips disk fsync + WebSocket broadcast
+        for smooth high-frequency command loops."""
+        runtime = _get_runtime(request)
+        try:
+            return runtime.apply_drive_fast(command)
+        except SafetyViolation as exc:
+            runtime.record_error(str(exc))
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
     @app.post("/api/drive/stop")
     async def stop_drive(request: Request, _: None = Depends(_authorize)):
         return _get_runtime(request).stop_drive()
