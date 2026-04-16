@@ -108,14 +108,10 @@ class CameraService:
                 configuration = self._picamera.create_video_configuration(
                     main={
                         "size": (self._config.camera_width, self._config.camera_height),
-                        "format": "BGR888",
+                        "format": "RGB888",
                     }
                 )
                 self._picamera.configure(configuration)
-                self._picamera.set_controls({
-                    "AwbEnable": True,
-                    "AwbMode": 1,  # 0=Auto, 1=Incandescent, 2=Tungsten, 3=Fluorescent, 4=Indoor, 5=Daylight, 6=Cloudy
-                })
                 self._picamera.start()
                 time.sleep(2.0)
                 self._backend_name = "picamera2"
@@ -134,7 +130,10 @@ class CameraService:
     def _capture_frame(self) -> np.ndarray | None:
         if self._picamera is not None:
             try:
-                return self._picamera.capture_array()
+                rgb_frame = self._picamera.capture_array()
+                if cv2 is None:
+                    return rgb_frame
+                return cv2.cvtColor(rgb_frame, cv2.COLOR_RGB2BGR)
             except Exception:
                 return None
         if self._camera is not None:
