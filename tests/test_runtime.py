@@ -45,6 +45,33 @@ def make_config(state_dir: Path) -> AppConfig:
 
 
 class RobotRuntimeTests(unittest.TestCase):
+    def test_start_migrates_legacy_default_camera_gains_to_neutral(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            state_dir = Path(tmp_dir)
+            store = StateStore(state_dir)
+            session = RobotSession()
+            session.settings.camera_red_gain = 1.35
+            session.settings.camera_green_gain = 1.0
+            session.settings.camera_blue_gain = 0.82
+            store.save(session)
+
+            runtime = RobotRuntime(make_config(state_dir))
+            loop = asyncio.new_event_loop()
+            try:
+                runtime.start(loop)
+                current = runtime.current_session()
+            finally:
+                runtime.stop()
+                loop.close()
+
+            persisted = store.load()
+            self.assertAlmostEqual(current.settings.camera_red_gain, 1.0)
+            self.assertAlmostEqual(current.settings.camera_green_gain, 1.0)
+            self.assertAlmostEqual(current.settings.camera_blue_gain, 1.0)
+            self.assertAlmostEqual(persisted.settings.camera_red_gain, 1.0)
+            self.assertAlmostEqual(persisted.settings.camera_green_gain, 1.0)
+            self.assertAlmostEqual(persisted.settings.camera_blue_gain, 1.0)
+
     def test_start_syncs_persisted_hardware_state_after_reset_pose(self) -> None:
         with TemporaryDirectory() as tmp_dir:
             state_dir = Path(tmp_dir)

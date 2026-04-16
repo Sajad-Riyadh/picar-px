@@ -18,6 +18,9 @@ from .vision import VisionService
 
 
 class RobotRuntime:
+    _LEGACY_DEFAULT_CAMERA_GAINS = (1.35, 1.0, 0.82)
+    _NEUTRAL_CAMERA_GAINS = (1.0, 1.0, 1.0)
+
     def __init__(self, config: AppConfig) -> None:
         self.config = config
         self.store = StateStore(config.state_dir)
@@ -281,9 +284,24 @@ class RobotRuntime:
             time.sleep(0.2)
 
     def _initialize_runtime_state(self, state: RobotSession) -> None:
+        self._migrate_legacy_camera_settings(state)
         state.voice_mode = state.settings.startup_voice_mode
         state.audio_target = state.settings.startup_audio_target
         self._refresh_session_metadata(state)
+
+    def _migrate_legacy_camera_settings(self, state: RobotSession) -> None:
+        gains = (
+            state.settings.camera_red_gain,
+            state.settings.camera_green_gain,
+            state.settings.camera_blue_gain,
+        )
+        if gains != self._LEGACY_DEFAULT_CAMERA_GAINS:
+            return
+        (
+            state.settings.camera_red_gain,
+            state.settings.camera_green_gain,
+            state.settings.camera_blue_gain,
+        ) = self._NEUTRAL_CAMERA_GAINS
 
     def _apply_camera_settings(self, settings: SettingsState) -> None:
         self.camera.set_color_gains(
