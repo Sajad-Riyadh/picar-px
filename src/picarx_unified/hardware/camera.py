@@ -124,7 +124,7 @@ class CameraService:
                 configuration = self._picamera.create_video_configuration(
                     main={
                         "size": (self._config.camera_width, self._config.camera_height),
-                        "format": "RGB888",
+                        "format": "BGR888",
                     }
                 )
                 self._picamera.configure(configuration)
@@ -147,9 +147,9 @@ class CameraService:
         if self._picamera is not None:
             try:
                 frame = self._picamera.capture_array()
-                if cv2 is None:
-                    return frame
-                frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                # Do not use cvtColor here; passing the array directly 
+                # to imencode might correctly use the native layout 
+                # (or picamera already matched it).
                 return self._apply_color_gains(frame)
             except Exception:
                 return None
