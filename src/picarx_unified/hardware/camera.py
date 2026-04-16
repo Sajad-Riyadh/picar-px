@@ -30,10 +30,26 @@ class CameraService:
         self._backend_name = "none"
         self._camera: Any = None
         self._picamera: Any = None
+        self._color_gains = np.array([1.0, 1.0, 1.0], dtype=np.float32)
 
     @property
     def backend_name(self) -> str:
         return self._backend_name
+
+    @property
+    def color_gains(self) -> tuple[float, float, float]:
+        with self._lock:
+            blue_gain, green_gain, red_gain = self._color_gains.tolist()
+        return red_gain, green_gain, blue_gain
+
+    def set_color_gains(self, *, red: float, green: float, blue: float) -> None:
+        gains = np.array([
+            float(np.clip(blue, 0.5, 1.8)),
+            float(np.clip(green, 0.5, 1.8)),
+            float(np.clip(red, 0.5, 1.8)),
+        ], dtype=np.float32)
+        with self._lock:
+            self._color_gains = gains
 
     def start(self) -> None:
         if self._running:
@@ -134,23 +150,20 @@ class CameraService:
                 if cv2 is None:
                     return frame
                 frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-                return self._balance_white(frame)
+                return self._apply_color_gains(frame)
             except Exception:
                 return None
         if self._camera is not None:
             ok, frame = self._camera.read()
             if ok:
-                return self._balance_white(frame)
+                return self._apply_color_gains(frame)
         return None
 
-    def _balance_white(self, frame: np.ndarray) -> np.ndarray:
+    def _apply_color_gains(self, frame: np.ndarray) -> np.ndarray:
         if frame.ndim != 3 or frame.shape[2] != 3:
             return frame
-        channel_means = frame.reshape(-1, 3).mean(axis=0)
-        overall_mean = float(channel_means.mean())
-        if overall_mean <= 0:
-            return frame
-        gains = np.clip(overall_mean / np.maximum(channel_means, 1.0), 0.75, 1.35)
+        with self._lock:
+            gains = self._color_gains.copy()
         balanced = frame.astype(np.float32) * gains.reshape(1, 1, 3)
         return np.clip(balanced, 0, 255).astype(np.uint8)
 

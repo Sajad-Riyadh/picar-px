@@ -8,7 +8,7 @@ from tempfile import TemporaryDirectory
 from picarx_unified.config import AppConfig
 from picarx_unified.runtime import RobotRuntime
 from picarx_unified.state import StateStore
-from picarx_unified.models import CameraState, DriveState, RobotSession
+from picarx_unified.models import CameraState, DriveState, RobotSession, SettingsUpdateRequest
 
 
 def make_config(state_dir: Path) -> AppConfig:
@@ -84,6 +84,38 @@ class RobotRuntimeTests(unittest.TestCase):
 
             self.assertEqual((session.camera.pan, session.camera.tilt), (18, -7))
             self.assertEqual((persisted.camera.pan, persisted.camera.tilt), (18, -7))
+
+    def test_update_settings_applies_camera_color_gains(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            state_dir = Path(tmp_dir)
+            runtime = RobotRuntime(make_config(state_dir))
+
+            session = runtime.update_settings(
+                SettingsUpdateRequest(
+                    greeting_text="Hello there. Welcome.",
+                    greeting_enabled=True,
+                    greeting_mode="simple_greeting",
+                    auto_tracking_enabled=True,
+                    camera_step_degrees=5,
+                    camera_red_gain=1.4,
+                    camera_green_gain=1.05,
+                    camera_blue_gain=0.8,
+                    startup_voice_mode="mute",
+                    startup_audio_target="car",
+                )
+            )
+            persisted = StateStore(state_dir).load()
+
+            self.assertAlmostEqual(session.settings.camera_red_gain, 1.4)
+            self.assertAlmostEqual(session.settings.camera_green_gain, 1.05)
+            self.assertAlmostEqual(session.settings.camera_blue_gain, 0.8)
+            self.assertAlmostEqual(persisted.settings.camera_red_gain, 1.4)
+            self.assertAlmostEqual(persisted.settings.camera_green_gain, 1.05)
+            self.assertAlmostEqual(persisted.settings.camera_blue_gain, 0.8)
+            red_gain, green_gain, blue_gain = runtime.camera.color_gains
+            self.assertAlmostEqual(red_gain, 1.4)
+            self.assertAlmostEqual(green_gain, 1.05)
+            self.assertAlmostEqual(blue_gain, 0.8)
 
 
 if __name__ == "__main__":

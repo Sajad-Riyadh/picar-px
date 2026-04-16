@@ -150,6 +150,12 @@ function cacheDom() {
   el.startupAudioTargetSelect = $("#startup-audio-target-select");
   el.cameraStepInput          = $("#camera-step-input");
   el.cameraStepValue          = $("#camera-step-value");
+  el.cameraRedGainInput       = $("#camera-red-gain-input");
+  el.cameraRedGainValue       = $("#camera-red-gain-value");
+  el.cameraGreenGainInput     = $("#camera-green-gain-input");
+  el.cameraGreenGainValue     = $("#camera-green-gain-value");
+  el.cameraBlueGainInput      = $("#camera-blue-gain-input");
+  el.cameraBlueGainValue      = $("#camera-blue-gain-value");
   el.settingsEstopBtn         = $("#settings-estop-btn");
   el.settingsResetBtn         = $("#settings-reset-btn");
   el.settingsSaveStatus       = $("#settings-save-status");
@@ -212,6 +218,9 @@ function syncRangeReadouts() {
   if (el.tiltValue)       el.tiltValue.textContent = `${el.tiltSlider.value}°`;
   if (el.driveSpeedValue) el.driveSpeedValue.textContent = `${el.driveSpeedSlider.value}%`;
   if (el.cameraStepValue) el.cameraStepValue.textContent = `${el.cameraStepInput.value}°`;
+  if (el.cameraRedGainValue)   el.cameraRedGainValue.textContent = `${Number(el.cameraRedGainInput.value).toFixed(2)}x`;
+  if (el.cameraGreenGainValue) el.cameraGreenGainValue.textContent = `${Number(el.cameraGreenGainInput.value).toFixed(2)}x`;
+  if (el.cameraBlueGainValue)  el.cameraBlueGainValue.textContent = `${Number(el.cameraBlueGainInput.value).toFixed(2)}x`;
   if (el.volumeValue)     el.volumeValue.textContent = `${el.volumeSlider.value}%`;
 }
 
@@ -303,6 +312,9 @@ function syncSettingsForm(settings, force = false) {
   el.startupVoiceModeSelect.value = settings.startup_voice_mode;
   el.startupAudioTargetSelect.value = settings.startup_audio_target;
   el.cameraStepInput.value = String(settings.camera_step_degrees);
+  el.cameraRedGainInput.value = String(settings.camera_red_gain);
+  el.cameraGreenGainInput.value = String(settings.camera_green_gain);
+  el.cameraBlueGainInput.value = String(settings.camera_blue_gain);
   el.cameraFollowToggle.checked = settings.auto_tracking_enabled;
   el.autoTrackingToggle.checked = settings.auto_tracking_enabled;
   el.greetingEnabledToggle.checked = settings.greeting_enabled;
@@ -659,8 +671,19 @@ function settingsPayloadFromForm() {
     greeting_mode: el.settingsGreetingMode.value,
     auto_tracking_enabled: el.autoTrackingInput.checked,
     camera_step_degrees: Number(el.cameraStepInput.value),
+    camera_red_gain: Number(el.cameraRedGainInput.value),
+    camera_green_gain: Number(el.cameraGreenGainInput.value),
+    camera_blue_gain: Number(el.cameraBlueGainInput.value),
     startup_voice_mode: el.startupVoiceModeSelect.value,
     startup_audio_target: el.startupAudioTargetSelect.value,
+  };
+}
+
+function cameraGainPatchFromForm() {
+  return {
+    camera_red_gain: Number(el.cameraRedGainInput.value),
+    camera_green_gain: Number(el.cameraGreenGainInput.value),
+    camera_blue_gain: Number(el.cameraBlueGainInput.value),
   };
 }
 
@@ -724,7 +747,7 @@ function registerGlobalCleanup() {
    ══════════════════════════════════════════ */
 
 function wireSettingsDirtyTracking() {
-  [el.greetingTextInput, el.greetingEnabledInput, el.autoTrackingInput, el.settingsGreetingMode, el.startupVoiceModeSelect, el.startupAudioTargetSelect, el.cameraStepInput].forEach(n => {
+  [el.greetingTextInput, el.greetingEnabledInput, el.autoTrackingInput, el.settingsGreetingMode, el.startupVoiceModeSelect, el.startupAudioTargetSelect, el.cameraStepInput, el.cameraRedGainInput, el.cameraGreenGainInput, el.cameraBlueGainInput].forEach(n => {
     if (!n) return;
     const h = () => { app.settingsDirty = true; setSettingsStatus("Unsaved changes.", "warn"); syncRangeReadouts(); };
     n.addEventListener("input", h); n.addEventListener("change", h);
@@ -804,6 +827,11 @@ async function init() {
   el.tiltSlider.addEventListener("change", () => updateCamera(Number(el.panSlider.value), Number(el.tiltSlider.value)).catch(e => setSpeechStatus(e.message, "danger")));
   el.presetChips.forEach(b => b.addEventListener("click", () => updateCamera(Number(b.dataset.pan), Number(b.dataset.tilt))));
   el.cameraFollowToggle.addEventListener("change", () => saveSettingsPatch({ auto_tracking_enabled: el.cameraFollowToggle.checked }));
+  [el.cameraRedGainInput, el.cameraGreenGainInput, el.cameraBlueGainInput].forEach(node => {
+    node.addEventListener("change", () => {
+      saveSettingsPatch(cameraGainPatchFromForm()).catch(e => setSettingsStatus(e.message, "danger"));
+    });
+  });
 
   // ── AI toggles (instant save)
   el.autoTrackingToggle.addEventListener("change", () => saveSettingsPatch({ auto_tracking_enabled: el.autoTrackingToggle.checked }));

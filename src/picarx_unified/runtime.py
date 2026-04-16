@@ -54,6 +54,7 @@ class RobotRuntime:
         self._running = True
         self.hardware.reset_pose()
         self.store.update(self._initialize_runtime_state)
+        self._apply_camera_settings(self.store.load().settings)
         self.camera.start()
         self.vision.start()
         self.behaviors.start()
@@ -111,10 +112,13 @@ class RobotRuntime:
         return self._publish_state()
 
     def update_settings(self, request: SettingsUpdateRequest) -> RobotSession:
+        settings = SettingsState(**request.model_dump())
+
         def mutate(state: RobotSession) -> None:
-            state.settings = SettingsState(**request.model_dump())
+            state.settings = settings
 
         self.store.update(mutate)
+        self._apply_camera_settings(settings)
         return self._publish_state()
 
     def record_error(self, message: str | None) -> RobotSession:
@@ -277,6 +281,13 @@ class RobotRuntime:
         state.voice_mode = state.settings.startup_voice_mode
         state.audio_target = state.settings.startup_audio_target
         self._refresh_session_metadata(state)
+
+    def _apply_camera_settings(self, settings: SettingsState) -> None:
+        self.camera.set_color_gains(
+            red=settings.camera_red_gain,
+            green=settings.camera_green_gain,
+            blue=settings.camera_blue_gain,
+        )
 
     def _refresh_session_metadata(self, state: RobotSession) -> None:
         self._sync_session_hardware_state(state)
