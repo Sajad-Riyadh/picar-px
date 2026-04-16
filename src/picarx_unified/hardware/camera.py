@@ -108,7 +108,7 @@ class CameraService:
                 configuration = self._picamera.create_video_configuration(
                     main={
                         "size": (self._config.camera_width, self._config.camera_height),
-                        "format": "RGB888",
+                        "format": "BGR888",
                     }
                 )
                 self._picamera.configure(configuration)
@@ -130,10 +130,7 @@ class CameraService:
     def _capture_frame(self) -> np.ndarray | None:
         if self._picamera is not None:
             try:
-                rgb_frame = self._picamera.capture_array()
-                if cv2 is None:
-                    return rgb_frame
-                return cv2.cvtColor(rgb_frame, cv2.COLOR_RGB2BGR)
+                return self._picamera.capture_array()
             except Exception:
                 return None
         if self._camera is not None:
