@@ -46,12 +46,16 @@ class AIService:
     def __init__(self, config: AppConfig) -> None:
         self._config = config
         self._client = None
-        if genai is not None and config.gemini_api_key:
+        if not config.gemini_api_key:
+            logger.warning("GEMINI_API_KEY is not configured; AIService will use rule-based fallbacks.")
+        elif genai is not None:
             try:
                 self._client = genai.Client(api_key=config.gemini_api_key)
             except Exception:
                 logger.exception("Failed to initialize Gemini client; falling back to local mode.")
                 self._client = None
+        else:
+            logger.warning("google-genai is unavailable; AIService will use rule-based fallbacks.")
 
     @property
     def provider_name(self) -> str:
@@ -82,6 +86,7 @@ class AIService:
         system_instruction: str,
         parts: list,
         max_output_tokens: int,
+        model: str | None = None,
     ) -> _LiveTurnResult:
         assert self._client is not None
         assert types is not None
@@ -92,7 +97,7 @@ class AIService:
             thinking_config=types.ThinkingConfig(thinking_level="minimal"),
         )
         async with self._client.aio.live.connect(
-            model=self._config.gemini_live_model,
+            model=model or self._config.gemini_live_model,
             config=config,
         ) as session:
             await session.send_client_content(
@@ -151,6 +156,7 @@ class AIService:
         system_instruction: str,
         parts: list,
         max_output_tokens: int,
+        model: str | None = None,
     ) -> _LiveTurnResult:
         assert self._client is not None
         assert types is not None
@@ -162,7 +168,7 @@ class AIService:
             thinking_config=types.ThinkingConfig(thinking_level="minimal"),
         )
         async with self._client.aio.live.connect(
-            model=self._config.gemini_live_model,
+            model=model or self._config.gemini_native_audio_model,
             config=config,
         ) as session:
             await session.send_client_content(
@@ -202,6 +208,58 @@ class AIService:
             audio_wav=audio_wav,
         )
 
+    async def _generate_reply_via_text(
+        self,
+        transcript: str,
+        vision_summary: str,
+    ) -> str | None:
+        assert types is not None
+        response = await self._live_text_turn(
+            system_instruction=(
+                "You are a PiCar-X robot running on a Raspberry Pi 5. "
+                "You may answer questions, describe the camera scene, and greet people, "
+                "but you must never claim to directly control the motors."
+            ),
+            parts=[
+                types.Part(
+                    text=(
+                        f"Camera summary: {vision_summary}\n"
+                        f"User transcript: {transcript}\n"
+                        "Reply in 1-3 short sentences."
+                    )
+                )
+            ],
+            max_output_tokens=180,
+            model=self._config.gemini_live_model,
+        )
+        return response.text
+
+    async def _generate_detection_greeting_via_text(
+        self,
+        greeting_text: str,
+        vision_summary: str,
+    ) -> str | None:
+        assert types is not None
+        response = await self._live_text_turn(
+            system_instruction=(
+                "You are the voice of a PiCar-X robot greeting a person who just appeared "
+                "in front of the camera. Keep the reply warm, short, and safe. "
+                "Do not mention driving or claim motor control."
+            ),
+            parts=[
+                types.Part(
+                    text=(
+                        f"Preferred greeting phrase: {greeting_text}\n"
+                        f"Current camera summary: {vision_summary}\n"
+                        "Speak in 1-2 short sentences and invite the person to talk."
+                    )
+                )
+            ],
+            max_output_tokens=120,
+            model=self._config.gemini_live_model,
+        )
+        return response.text
+
     async def generate_reply(self, transcript: str, vision_summary: str) -> tuple[str, bytes | None]:
         transcript = transcript.strip()
         if not transcript:
@@ -226,12 +284,27 @@ class AIService:
                     )
                 ],
                 max_output_tokens=180,
+                model=self._config.gemini_native_audio_model,
             )
-            reply_text = response.text or self._fallback_reply(transcript, vision_summary)
-            return reply_text, response.audio_wav
+            if response.audio_wav or response.text:
+                reply_text = response.text or self._fallback_reply(transcript, vision_summary)
+                return reply_text, response.audio_wav
+            logger.warning(
+                "Gemini audio turn returned no text or audio; retrying with text model %s.",
+                self._config.gemini_live_model,
+            )
         except Exception:
-            logger.exception("Gemini reply generation failed; using fallback reply.")
-            return self._fallback_reply(transcript, vision_summary), None
+            logger.exception(
+                "Gemini native audio reply failed on model %s; retrying with text model.",
+                self._config.gemini_native_audio_model,
+            )
+        try:
+            text_reply = await self._generate_reply_via_text(transcript, vision_summary)
+            if text_reply:
+                return text_reply, None
+        except Exception:
+            logger.exception("Gemini text reply fallback failed; using local fallback reply.")
+        return self._fallback_reply(transcript, vision_summary), None
 
     async def answer_vision(
         self,
@@ -297,11 +370,29 @@ class AIService:
                     )
                 ],
                 max_output_tokens=120,
+                model=self._config.gemini_native_audio_model,
             )
-            return response.text or greeting_text, response.audio_wav
+            if response.audio_wav or response.text:
+                return response.text or greeting_text, response.audio_wav
+            logger.warning(
+                "Gemini audio greeting returned no text or audio; retrying with text model %s.",
+                self._config.gemini_live_model,
+            )
         except Exception:
-            logger.exception("Gemini greeting generation failed; using configured greeting text.")
-            return greeting_text, None
+            logger.exception(
+                "Gemini native audio greeting failed on model %s; retrying with text model.",
+                self._config.gemini_native_audio_model,
+            )
+        try:
+            text_greeting = await self._generate_detection_greeting_via_text(
+                greeting_text,
+                vision_summary,
+            )
+            if text_greeting:
+                return text_greeting, None
+        except Exception:
+            logger.exception("Gemini text greeting fallback failed; using configured greeting text.")
+        return greeting_text, None
 
     async def transcribe_pcm(self, pcm_bytes: bytes, sample_rate: int) -> str | None:
         if self._client is None or not pcm_bytes:
