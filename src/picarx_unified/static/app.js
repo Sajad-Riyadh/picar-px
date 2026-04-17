@@ -585,6 +585,10 @@ class VoiceSocketController {
     if (payload.type === "error") {
       this.state.awaitingReply = false;
       this.callbacks.setSpeechStatus(payload.message, "danger");
+      return;
+    }
+    if (payload.type === "status") {
+      this.callbacks.setSpeechStatus(payload.message, payload.tone || "neutral");
     }
   }
 

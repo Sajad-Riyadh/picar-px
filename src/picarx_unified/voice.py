@@ -100,13 +100,22 @@ class VoiceConnection:
             return
         if session.voice_mode == VoiceMode.AI_REPLY:
             if len(self._pcm_buffer) + len(pcm_bytes) > self._max_pcm_bytes:
-                self._pcm_buffer.clear()
-                self._transcript = ""
-                await self._send_error(
-                    "Voice capture exceeded the configured limit. "
-                    "Commit sooner or shorten the utterance."
+                await self._commit_turn()
+                await self._send_json(
+                    {
+                        "type": "status",
+                        "message": (
+                            "Voice capture reached the current turn limit. "
+                            "The buffered audio was submitted automatically."
+                        ),
+                        "tone": "warn",
+                    }
                 )
-                return
+                if len(pcm_bytes) > self._max_pcm_bytes:
+                    await self._send_error(
+                        "A single PCM chunk exceeded the configured voice capture limit."
+                    )
+                    return
             self._pcm_buffer.extend(pcm_bytes)
 
     async def _commit_turn(self) -> None:

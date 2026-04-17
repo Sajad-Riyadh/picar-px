@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import unittest
+from base64 import b64encode
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
@@ -101,6 +102,38 @@ class VoiceSocketTests(unittest.TestCase):
 
                 self.assertEqual(handle_ai_turn.call_count, 1)
                 self.assertEqual(handle_ai_turn.call_args.args[1], "hello robot")
+
+    def test_pcm_overflow_auto_commits_buffered_turn(self) -> None:
+        with TemporaryDirectory() as tmp_dir, patch.dict(os.environ, _voice_env(tmp_dir), clear=False):
+            with (
+                patch.object(RobotRuntime, "handle_ai_turn", autospec=True, return_value="ok") as handle_ai_turn,
+                patch("picarx_unified.ai.AIService.transcribe_pcm", autospec=True, return_value="auto transcript"),
+            ):
+                with TestClient(create_app()) as client:
+                    response = client.post("/api/voice/mode", json={"mode": "ai_reply"})
+                    self.assertEqual(response.status_code, 200)
+
+                    with client.websocket_connect("/ws/voice") as websocket:
+                        _drain_initial_state_messages(websocket)
+                        websocket.send_json(
+                            {
+                                "type": "pcm_chunk",
+                                "audio": b64encode(b"\x00\x00" * 5000).decode("ascii"),
+                            }
+                        )
+                        websocket.send_json(
+                            {
+                                "type": "pcm_chunk",
+                                "audio": b64encode(b"\x00\x00" * 4000).decode("ascii"),
+                            }
+                        )
+
+                        status_payload = websocket.receive_json()
+                        self.assertEqual(status_payload["type"], "status")
+                        self.assertIn("submitted automatically", status_payload["message"])
+
+                self.assertEqual(handle_ai_turn.call_count, 1)
+                self.assertEqual(handle_ai_turn.call_args.args[1], "auto transcript")
 
 
 if __name__ == "__main__":
