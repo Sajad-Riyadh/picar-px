@@ -38,6 +38,16 @@ class VoiceSocketTests(unittest.TestCase):
                         "greeting_enabled": True,
                         "greeting_mode": "ai_live_greeting",
                         "auto_tracking_enabled": False,
+                        "detection_enabled": True,
+                        "face_detection_enabled": True,
+                        "person_detection_enabled": True,
+                        "cat_detection_enabled": False,
+                        "object_detection_enabled": True,
+                        "detection_overlay_enabled": True,
+                        "autonomous_mode_enabled": True,
+                        "autonomous_drive_speed": 10,
+                        "autonomous_turn_strength": 16,
+                        "autonomous_stop_distance_cm": 28,
                         "camera_step_degrees": 8,
                         "startup_voice_mode": "relay",
                         "startup_audio_target": "both",
@@ -48,12 +58,17 @@ class VoiceSocketTests(unittest.TestCase):
                 self.assertEqual(state_payload["settings"]["greeting_text"], "Welcome aboard.")
                 self.assertEqual(state_payload["settings"]["greeting_mode"], "ai_live_greeting")
                 self.assertFalse(state_payload["settings"]["auto_tracking_enabled"])
+                self.assertTrue(state_payload["settings"]["autonomous_mode_enabled"])
+                self.assertFalse(state_payload["settings"]["cat_detection_enabled"])
 
                 settings_response = client.get("/api/settings")
                 self.assertEqual(settings_response.status_code, 200)
                 settings_payload = settings_response.json()
                 self.assertEqual(settings_payload["camera_step_degrees"], 8)
                 self.assertEqual(settings_payload["startup_audio_target"], "both")
+                self.assertEqual(settings_payload["autonomous_drive_speed"], 10)
+                self.assertEqual(settings_payload["autonomous_turn_strength"], 16)
+                self.assertEqual(settings_payload["autonomous_stop_distance_cm"], 28)
 
     def test_invalid_json_returns_error_and_socket_stays_open(self) -> None:
         with TemporaryDirectory() as tmp_dir, patch.dict(os.environ, _voice_env(tmp_dir), clear=False):

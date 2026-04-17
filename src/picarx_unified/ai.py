@@ -1,15 +1,16 @@
 from __future__ import annotations
 
-import asyncio
 import io
+import logging
+import re
 import shutil
 import subprocess
-import threading
 import wave
 from dataclasses import dataclass
-from typing import Awaitable, Callable, TypeVar
 
 from .config import AppConfig
+
+logger = logging.getLogger(__name__)
 
 try:
     from google import genai
@@ -19,13 +20,11 @@ except Exception:  # pragma: no cover - optional during local development
     types = None
 
 
-_T = TypeVar("_T")
-
-
 @dataclass(slots=True)
 class _LiveTurnResult:
     text: str | None = None
     input_transcription: str | None = None
+    audio_wav: bytes | None = None
 
 
 def pcm16_to_wav(pcm_bytes: bytes, sample_rate: int) -> bytes:
@@ -51,6 +50,7 @@ class AIService:
             try:
                 self._client = genai.Client(api_key=config.gemini_api_key)
             except Exception:
+                logger.exception("Failed to initialize Gemini client; falling back to local mode.")
                 self._client = None
 
     @property
@@ -64,27 +64,17 @@ class AIService:
         stripped = text.strip()
         return stripped or None
 
-    def _run_async(self, factory: Callable[[], Awaitable[_T]]) -> _T:
+    @staticmethod
+    def _parse_pcm_sample_rate(mime_type: str | None, default: int = 24000) -> int:
+        if not isinstance(mime_type, str):
+            return default
+        match = re.search(r"rate=(\d+)", mime_type)
+        if match is None:
+            return default
         try:
-            asyncio.get_running_loop()
-        except RuntimeError:
-            return asyncio.run(factory())
-
-        result: dict[str, _T] = {}
-        error: dict[str, BaseException] = {}
-
-        def runner() -> None:
-            try:
-                result["value"] = asyncio.run(factory())
-            except BaseException as exc:
-                error["value"] = exc
-
-        thread = threading.Thread(target=runner, name="gemini-live-call", daemon=True)
-        thread.start()
-        thread.join()
-        if "value" in error:
-            raise error["value"]
-        return result["value"]
+            return max(int(match.group(1)), 1)
+        except ValueError:
+            return default
 
     async def _live_text_turn(
         self,
@@ -155,106 +145,172 @@ class AIService:
             input_transcription=transcript,
         )
 
-    def generate_reply(self, transcript: str, vision_summary: str) -> str:
+    async def _live_audio_turn(
+        self,
+        *,
+        system_instruction: str,
+        parts: list,
+        max_output_tokens: int,
+    ) -> _LiveTurnResult:
+        assert self._client is not None
+        assert types is not None
+        config = types.LiveConnectConfig(
+            response_modalities=["AUDIO"],
+            max_output_tokens=max_output_tokens,
+            system_instruction=system_instruction,
+            output_audio_transcription=types.AudioTranscriptionConfig(),
+            thinking_config=types.ThinkingConfig(thinking_level="minimal"),
+        )
+        async with self._client.aio.live.connect(
+            model=self._config.gemini_live_model,
+            config=config,
+        ) as session:
+            await session.send_client_content(
+                turns=types.Content(role="user", parts=parts),
+                turn_complete=True,
+            )
+            audio_chunks: list[bytes] = []
+            transcript_chunks: list[str] = []
+            audio_mime_type: str | None = None
+            async for message in session.receive():
+                server_content = getattr(message, "server_content", None)
+                model_turn = getattr(server_content, "model_turn", None)
+                for part in getattr(model_turn, "parts", []) or []:
+                    inline_data = getattr(part, "inline_data", None)
+                    inline_bytes = getattr(inline_data, "data", None)
+                    if isinstance(inline_bytes, bytes) and inline_bytes:
+                        audio_chunks.append(inline_bytes)
+                        audio_mime_type = getattr(inline_data, "mime_type", None) or audio_mime_type
+                output_transcription = getattr(server_content, "output_transcription", None)
+                chunk = self._clean_text(getattr(output_transcription, "text", None))
+                if chunk:
+                    transcript_chunks.append(chunk)
+
+        audio_wav: bytes | None = None
+        if audio_chunks:
+            audio_bytes = b"".join(audio_chunks)
+            if isinstance(audio_mime_type, str) and audio_mime_type.lower().startswith("audio/wav"):
+                audio_wav = audio_bytes
+            else:
+                audio_wav = pcm16_to_wav(
+                    audio_bytes,
+                    self._parse_pcm_sample_rate(audio_mime_type),
+                )
+
+        return _LiveTurnResult(
+            text=self._clean_text(" ".join(transcript_chunks)),
+            audio_wav=audio_wav,
+        )
+
+    async def generate_reply(self, transcript: str, vision_summary: str) -> tuple[str, bytes | None]:
         transcript = transcript.strip()
         if not transcript:
-            return "I did not catch that."
+            return "I did not catch that.", None
         if self._client is None:
-            return self._fallback_reply(transcript, vision_summary)
+            return self._fallback_reply(transcript, vision_summary), None
+        assert types is not None
         try:
-            response = self._run_async(
-                lambda: self._live_text_turn(
-                    system_instruction=(
-                        "You are a PiCar-X robot running on a Raspberry Pi 5. "
-                        "You may answer questions, describe the camera scene, and greet people, "
-                        "but you must never claim to directly control the motors."
-                    ),
-                    parts=[
-                        types.Part(
-                            text=(
-                                f"Camera summary: {vision_summary}\n"
-                                f"User transcript: {transcript}\n"
-                                "Reply in 1-3 short sentences."
-                            )
+            response = await self._live_audio_turn(
+                system_instruction=(
+                    "You are a PiCar-X robot running on a Raspberry Pi 5. "
+                    "You may answer questions, describe the camera scene, and greet people, "
+                    "but you must never claim to directly control the motors."
+                ),
+                parts=[
+                    types.Part(
+                        text=(
+                            f"Camera summary: {vision_summary}\n"
+                            f"User transcript: {transcript}\n"
+                            "Reply in 1-3 short sentences."
                         )
-                    ],
-                    max_output_tokens=180,
-                )
+                    )
+                ],
+                max_output_tokens=180,
             )
-            return response.text or self._fallback_reply(transcript, vision_summary)
+            reply_text = response.text or self._fallback_reply(transcript, vision_summary)
+            return reply_text, response.audio_wav
         except Exception:
-            return self._fallback_reply(transcript, vision_summary)
+            logger.exception("Gemini reply generation failed; using fallback reply.")
+            return self._fallback_reply(transcript, vision_summary), None
 
-    def answer_vision(self, question: str, vision_summary: str, frame_jpeg: bytes | None = None) -> str:
+    async def answer_vision(
+        self,
+        question: str,
+        vision_summary: str,
+        frame_jpeg: bytes | None = None,
+    ) -> str:
         if self._client is None or not frame_jpeg:
             return self._fallback_vision_answer(question, vision_summary)
+        assert types is not None
         try:
-            response = self._run_async(
-                lambda: self._live_text_turn(
-                    system_instruction=(
-                        "Answer questions about the robot camera view. "
-                        "Do not invent motor actions or unseen objects."
+            response = await self._live_text_turn(
+                system_instruction=(
+                    "Answer questions about the robot camera view. "
+                    "Do not invent motor actions or unseen objects."
+                ),
+                parts=[
+                    types.Part(
+                        text=(
+                            f"Current local detection summary: {vision_summary}\n"
+                            f"Question: {question}"
+                        )
                     ),
-                    parts=[
-                        types.Part(
-                            text=(
-                                f"Current local detection summary: {vision_summary}\n"
-                                f"Question: {question}"
-                            )
-                        ),
-                        types.Part(
-                            inline_data=types.Blob(
-                                data=frame_jpeg,
-                                mime_type="image/jpeg",
-                            )
-                        ),
-                    ],
-                    max_output_tokens=220,
-                )
+                    types.Part(
+                        inline_data=types.Blob(
+                            data=frame_jpeg,
+                            mime_type="image/jpeg",
+                        )
+                    ),
+                ],
+                max_output_tokens=220,
             )
             return response.text or self._fallback_vision_answer(question, vision_summary)
         except Exception:
+            logger.exception("Gemini vision answer failed; using local vision fallback.")
             return self._fallback_vision_answer(question, vision_summary)
 
-    def generate_detection_greeting(self, greeting_text: str, vision_summary: str) -> str:
+    async def generate_detection_greeting(
+        self,
+        greeting_text: str,
+        vision_summary: str,
+    ) -> tuple[str, bytes | None]:
         greeting_text = greeting_text.strip()
         if not greeting_text:
             greeting_text = "Hello there. Welcome."
         if self._client is None:
-            return greeting_text
+            return greeting_text, None
+        assert types is not None
         try:
-            response = self._run_async(
-                lambda: self._live_text_turn(
-                    system_instruction=(
-                        "You are the voice of a PiCar-X robot greeting a person who just appeared "
-                        "in front of the camera. Keep the reply warm, short, and safe. "
-                        "Do not mention driving or claim motor control."
-                    ),
-                    parts=[
-                        types.Part(
-                            text=(
-                                f"Preferred greeting phrase: {greeting_text}\n"
-                                f"Current camera summary: {vision_summary}\n"
-                                "Speak in 1-2 short sentences and invite the person to talk."
-                            )
+            response = await self._live_audio_turn(
+                system_instruction=(
+                    "You are the voice of a PiCar-X robot greeting a person who just appeared "
+                    "in front of the camera. Keep the reply warm, short, and safe. "
+                    "Do not mention driving or claim motor control."
+                ),
+                parts=[
+                    types.Part(
+                        text=(
+                            f"Preferred greeting phrase: {greeting_text}\n"
+                            f"Current camera summary: {vision_summary}\n"
+                            "Speak in 1-2 short sentences and invite the person to talk."
                         )
-                    ],
-                    max_output_tokens=120,
-                )
+                    )
+                ],
+                max_output_tokens=120,
             )
-            return response.text or greeting_text
+            return response.text or greeting_text, response.audio_wav
         except Exception:
-            return greeting_text
+            logger.exception("Gemini greeting generation failed; using configured greeting text.")
+            return greeting_text, None
 
-    def transcribe_pcm(self, pcm_bytes: bytes, sample_rate: int) -> str | None:
+    async def transcribe_pcm(self, pcm_bytes: bytes, sample_rate: int) -> str | None:
         if self._client is None or not pcm_bytes:
             return None
         try:
-            response = self._run_async(
-                lambda: self._live_transcription_turn(pcm_bytes, sample_rate)
-            )
+            response = await self._live_transcription_turn(pcm_bytes, sample_rate)
             return response.input_transcription or response.text
         except Exception:
+            logger.exception("Gemini transcription failed; server-side STT unavailable.")
             return None
 
     def synthesize(self, text: str) -> bytes:
@@ -273,7 +329,7 @@ class AIService:
             if result.returncode == 0 and result.stdout:
                 return result.stdout
         except OSError:
-            pass
+            logger.exception("Speech synthesis failed; returning silence.")
         return silent_wav()
 
     def _fallback_reply(self, transcript: str, vision_summary: str) -> str:

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import base64
 import binascii
 import json
@@ -121,8 +120,7 @@ class VoiceConnection:
         self._pcm_buffer.clear()
         self._transcript = ""
         if not transcript:
-            transcript = await asyncio.to_thread(
-                self._runtime.ai.transcribe_pcm,
+            transcript = await self._runtime.ai.transcribe_pcm(
                 pcm_bytes,
                 self._runtime.config.voice_sample_rate,
             ) or ""
@@ -134,6 +132,6 @@ class VoiceConnection:
             )
             return
         try:
-            await asyncio.to_thread(self._runtime.handle_ai_turn, transcript)
+            await self._runtime.handle_ai_turn(transcript)
         except Exception:
             await self._send_error("Assistant processing failed for the current turn.")

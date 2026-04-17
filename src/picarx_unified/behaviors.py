@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import threading
 import time
 from typing import Callable
@@ -169,11 +170,14 @@ class RobotBehaviorController:
             self._on_greet("", "Detection-only mode triggered.")
             return
         greeting = settings.greeting_text
+        native_wav: bytes | None = None
         action = "Simple greeting delivered."
         if settings.greeting_mode == GreetingMode.AI_LIVE:
-            greeting = self._ai.generate_detection_greeting(settings.greeting_text, vision_summary)
+            greeting, native_wav = asyncio.run(
+                self._ai.generate_detection_greeting(settings.greeting_text, vision_summary)
+            )
             action = "AI live greeting delivered."
-        wav_bytes = self._ai.synthesize(greeting)
+        wav_bytes = native_wav or self._ai.synthesize(greeting)
         self._audio.route_assistant_audio(
             wav_bytes,
             target,

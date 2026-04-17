@@ -144,7 +144,7 @@ def create_app() -> FastAPI:
         body: VisionQuestionRequest,
         _: None = Depends(_authorize),
     ):
-        answer = _get_runtime(request).answer_vision_question(body.question)
+        answer = await _get_runtime(request).answer_vision_question(body.question)
         return JSONResponse({"answer": answer})
 
     @app.get("/stream.mjpg")

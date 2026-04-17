@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from typing import Any
@@ -18,13 +19,18 @@ try:
 except Exception:  # pragma: no cover - Pi-only dependency
     Picamera2 = None
 
+logger = logging.getLogger(__name__)
+
 
 class CameraService:
     def __init__(self, config: AppConfig) -> None:
         self._config = config
         self._lock = threading.Lock()
+        self._frame_ready = threading.Condition(self._lock)
         self._frame: np.ndarray | None = None
+        self._frame_jpeg: bytes | None = None
         self._frame_at = 0.0
+        self._frame_sequence = 0
         self._running = False
         self._thread: threading.Thread | None = None
         self._backend_name = "none"
@@ -60,6 +66,8 @@ class CameraService:
 
     def stop(self) -> None:
         self._running = False
+        with self._frame_ready:
+            self._frame_ready.notify_all()
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=1.0)
         self._thread = None
@@ -77,33 +85,43 @@ class CameraService:
             self._picamera = None
 
     def get_frame(self) -> np.ndarray | None:
-        with self._lock:
+        with self._frame_ready:
             return None if self._frame is None else self._frame.copy()
 
     def get_frame_jpeg(self) -> bytes | None:
-        frame = self.get_frame()
-        if frame is None or cv2 is None:
+        with self._frame_ready:
+            if self._frame_jpeg is not None:
+                return self._frame_jpeg
+            frame = None if self._frame is None else self._frame.copy()
+        if frame is None:
             return None
-        ok, encoded = cv2.imencode(
-            ".jpg",
-            frame,
-            [int(cv2.IMWRITE_JPEG_QUALITY), self._config.jpeg_quality],
-        )
-        if not ok:
+        jpeg = self._encode_frame_jpeg(frame)
+        if jpeg is None:
             return None
-        return encoded.tobytes()
+        with self._frame_ready:
+            if self._frame_jpeg is None:
+                self._frame_jpeg = jpeg
+            return self._frame_jpeg
 
     def stream_generator(self):
+        last_sequence = -1
         while True:
-            jpeg = self.get_frame_jpeg()
-            if jpeg:
-                yield (
-                    b"--frame\r\n"
-                    b"Content-Type: image/jpeg\r\n\r\n"
-                    + jpeg
-                    + b"\r\n"
+            with self._frame_ready:
+                self._frame_ready.wait_for(
+                    lambda: self._frame_sequence != last_sequence or not self._running
                 )
-            time.sleep(max(1.0 / self._config.camera_fps, 0.05))
+                if not self._running and self._frame_sequence == last_sequence:
+                    break
+                last_sequence = self._frame_sequence
+                jpeg = self._frame_jpeg
+            if not jpeg:
+                continue
+            yield (
+                b"--frame\r\n"
+                b"Content-Type: image/jpeg\r\n\r\n"
+                + jpeg
+                + b"\r\n"
+            )
 
     def _capture_loop(self) -> None:
         self._initialise_backend()
@@ -112,9 +130,13 @@ class CameraService:
             frame = self._capture_frame()
             if frame is None:
                 frame = self._placeholder_frame()
-            with self._lock:
+            jpeg = self._encode_frame_jpeg(frame)
+            with self._frame_ready:
                 self._frame = frame
+                self._frame_jpeg = jpeg
                 self._frame_at = time.time()
+                self._frame_sequence += 1
+                self._frame_ready.notify_all()
             time.sleep(interval)
 
     def _initialise_backend(self) -> None:
@@ -131,17 +153,24 @@ class CameraService:
                 self._picamera.start()
                 time.sleep(2.0)
                 self._backend_name = "picamera2"
+                logger.info("Camera backend initialized with Picamera2.")
                 return
             except Exception:
+                logger.exception("Picamera2 initialization failed; falling back to other camera backends.")
                 self._picamera = None
         if not self._config.force_mock_camera and cv2 is not None:
-            self._camera = cv2.VideoCapture(self._config.camera_index)
-            if self._camera is not None and self._camera.isOpened():
-                self._camera.set(cv2.CAP_PROP_FRAME_WIDTH, self._config.camera_width)
-                self._camera.set(cv2.CAP_PROP_FRAME_HEIGHT, self._config.camera_height)
-                self._backend_name = "opencv"
-                return
+            try:
+                self._camera = cv2.VideoCapture(self._config.camera_index)
+                if self._camera is not None and self._camera.isOpened():
+                    self._camera.set(cv2.CAP_PROP_FRAME_WIDTH, self._config.camera_width)
+                    self._camera.set(cv2.CAP_PROP_FRAME_HEIGHT, self._config.camera_height)
+                    self._backend_name = "opencv"
+                    logger.info("Camera backend initialized with OpenCV capture.")
+                    return
+            except Exception:
+                logger.exception("OpenCV camera initialization failed; using mock camera backend.")
         self._backend_name = "mock"
+        logger.warning("Camera backend is using mock frames.")
 
     def _capture_frame(self) -> np.ndarray | None:
         if self._picamera is not None:
@@ -152,9 +181,14 @@ class CameraService:
                 # (or picamera already matched it).
                 return self._apply_color_gains(frame)
             except Exception:
+                logger.exception("Picamera2 frame capture failed.")
                 return None
         if self._camera is not None:
-            ok, frame = self._camera.read()
+            try:
+                ok, frame = self._camera.read()
+            except Exception:
+                logger.exception("OpenCV frame capture failed.")
+                return None
             if ok:
                 return self._apply_color_gains(frame)
         return None
@@ -166,6 +200,18 @@ class CameraService:
             gains = self._color_gains.copy()
         balanced = frame.astype(np.float32) * gains.reshape(1, 1, 3)
         return np.clip(balanced, 0, 255).astype(np.uint8)
+
+    def _encode_frame_jpeg(self, frame: np.ndarray) -> bytes | None:
+        if cv2 is None:
+            return None
+        ok, encoded = cv2.imencode(
+            ".jpg",
+            frame,
+            [int(cv2.IMWRITE_JPEG_QUALITY), self._config.jpeg_quality],
+        )
+        if not ok:
+            return None
+        return encoded.tobytes()
 
     def _placeholder_frame(self) -> np.ndarray:
         frame = np.zeros((self._config.camera_height, self._config.camera_width, 3), dtype=np.uint8)

@@ -140,7 +140,7 @@ install_sunfounder_stack() {
   git clone --depth 1 -b v2.0 https://github.com/SunFounder/picar-x.git "$tmp_dir"
   (
     cd "$tmp_dir"
-    run_root python3 setup.py install
+    run_root python3 -m pip install .
   )
   rm -rf "$tmp_dir"
 
