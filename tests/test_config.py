@@ -29,6 +29,7 @@ class AppConfigTests(unittest.TestCase):
         self.assertEqual(config.api_token, "secret-token")
         self.assertEqual(config.gemini_api_key, "gemini-test")
         self.assertEqual(config.voice_capture_max_seconds, 7.5)
+        self.assertEqual(config.gemini_transcription_model, "gemini-2.5-flash")
 
 
 if __name__ == "__main__":

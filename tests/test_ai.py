@@ -4,6 +4,7 @@ import asyncio
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import AsyncMock
 
 from picarx_unified.ai import AIService
 from picarx_unified.config import AppConfig
@@ -44,6 +45,7 @@ def make_config(state_dir: Path) -> AppConfig:
         gemini_api_key=None,
         gemini_live_model="gemini-3.1-flash-live-preview",
         gemini_native_audio_model="gemini-2.5-flash-native-audio-preview-12-2025",
+        gemini_transcription_model="gemini-2.5-flash",
     )
 
 
@@ -67,6 +69,19 @@ class AIServiceTests(unittest.TestCase):
             self.assertEqual(greeting, "Welcome aboard.")
             self.assertIsNone(greeting_audio)
             self.assertIsNone(transcript)
+
+    def test_transcribe_pcm_falls_back_to_generate_content_when_live_fails(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            ai = AIService(make_config(Path(tmp_dir)))
+            ai._client = object()
+            ai._live_transcription_turn = AsyncMock(side_effect=RuntimeError("live failed"))
+            ai._content_transcription_turn = AsyncMock(return_value="hello from fallback")
+
+            transcript = asyncio.run(ai.transcribe_pcm(b"\x01\x02" * 64, 16000))
+
+            self.assertEqual(transcript, "hello from fallback")
+            ai._live_transcription_turn.assert_awaited_once()
+            ai._content_transcription_turn.assert_awaited_once()
 
 
 if __name__ == "__main__":

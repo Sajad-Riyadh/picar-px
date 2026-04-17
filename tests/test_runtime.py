@@ -46,6 +46,7 @@ def make_config(state_dir: Path) -> AppConfig:
         gemini_api_key=None,
         gemini_live_model="gemini-3.1-flash-live-preview",
         gemini_native_audio_model="gemini-2.5-flash-native-audio-preview-12-2025",
+        gemini_transcription_model="gemini-2.5-flash",
     )
 
 

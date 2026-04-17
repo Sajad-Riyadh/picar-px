@@ -85,6 +85,7 @@ class AppConfig:
     gemini_api_key: str | None
     gemini_live_model: str
     gemini_native_audio_model: str
+    gemini_transcription_model: str
 
     @classmethod
     def from_env(cls) -> "AppConfig":
@@ -131,4 +132,9 @@ class AppConfig:
                 "gemini-2.5-flash-native-audio-preview-12-2025",
             )
             or "gemini-2.5-flash-native-audio-preview-12-2025",
+            gemini_transcription_model=_env_text(
+                "GEMINI_TRANSCRIPTION_MODEL",
+                "gemini-2.5-flash",
+            )
+            or "gemini-2.5-flash",
         )

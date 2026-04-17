@@ -132,13 +132,8 @@ class AIService:
             model=self._config.gemini_live_model,
             config=config,
         ) as session:
-            await session.send_client_content(
-                turns=types.Content(
-                    role="user",
-                    parts=[types.Part(inline_data=audio)],
-                ),
-                turn_complete=True,
-            )
+            await session.send_realtime_input(audio=audio)
+            await session.send_realtime_input(audio_stream_end=True)
             chunks: list[str] = []
             transcript: str | None = None
             async for message in session.receive():
@@ -154,6 +149,26 @@ class AIService:
             text=self._clean_text("".join(chunks)),
             input_transcription=transcript,
         )
+
+    async def _content_transcription_turn(self, pcm_bytes: bytes, sample_rate: int) -> str | None:
+        assert self._client is not None
+        assert types is not None
+        wav_bytes = pcm16_to_wav(pcm_bytes, sample_rate)
+        response = await self._client.aio.models.generate_content(
+            model=self._config.gemini_transcription_model,
+            contents=[
+                "Generate a transcript of the speech. Return only the transcript text.",
+                types.Part.from_bytes(data=wav_bytes, mime_type="audio/wav"),
+            ],
+            config=types.GenerateContentConfig(
+                temperature=0,
+                system_instruction=(
+                    "Transcribe the user's speech verbatim in plain text. "
+                    "Return only the transcript and do not answer the user."
+                ),
+            ),
+        )
+        return self._clean_text(getattr(response, "text", None))
 
     async def _live_audio_turn(
         self,
@@ -404,10 +419,31 @@ class AIService:
             return None
         try:
             response = await self._live_transcription_turn(pcm_bytes, sample_rate)
-            return response.input_transcription or response.text
+            transcript = response.input_transcription or response.text
+            if transcript:
+                return transcript
+            logger.warning(
+                "Gemini live transcription returned no transcript; retrying with model %s.",
+                self._config.gemini_transcription_model,
+            )
         except Exception:
-            logger.exception("Gemini transcription failed; server-side STT unavailable.")
-            return None
+            logger.warning(
+                "Gemini live transcription failed on model %s; retrying with model %s.",
+                self._config.gemini_live_model,
+                self._config.gemini_transcription_model,
+                exc_info=True,
+            )
+        try:
+            transcript = await self._content_transcription_turn(pcm_bytes, sample_rate)
+            if transcript:
+                return transcript
+        except Exception:
+            logger.exception(
+                "Gemini fallback transcription failed on model %s.",
+                self._config.gemini_transcription_model,
+            )
+        logger.warning("Gemini transcription failed; server-side STT unavailable.")
+        return None
 
     def synthesize(self, text: str) -> bytes:
         text = text.strip()
