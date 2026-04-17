@@ -8,7 +8,7 @@ from tempfile import TemporaryDirectory
 from picarx_unified.config import AppConfig
 from picarx_unified.runtime import RobotRuntime
 from picarx_unified.state import StateStore
-from picarx_unified.models import CameraState, DriveState, RobotSession, SettingsUpdateRequest
+from picarx_unified.models import CameraState, DriveRequest, DriveState, RobotSession, SettingsUpdateRequest
 
 
 def make_config(state_dir: Path) -> AppConfig:
@@ -36,6 +36,10 @@ def make_config(state_dir: Path) -> AppConfig:
         greet_cooldown_seconds=20.0,
         tracking_step_degrees=5,
         tracking_deadband_px=36,
+        vision_loop_seconds=0.2,
+        motion_object_min_area=1200,
+        autonomous_max_speed=20,
+        autonomous_manual_override_seconds=2.5,
         use_mock_hardware=True,
         force_mock_camera=True,
         api_token=None,
@@ -116,6 +120,18 @@ class RobotRuntimeTests(unittest.TestCase):
             self.assertAlmostEqual(red_gain, 1.4)
             self.assertAlmostEqual(green_gain, 1.05)
             self.assertAlmostEqual(blue_gain, 0.8)
+
+    def test_manual_drive_sets_manual_override_even_when_autonomy_is_enabled(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            state_dir = Path(tmp_dir)
+            runtime = RobotRuntime(make_config(state_dir))
+
+            runtime.update_settings(SettingsUpdateRequest(autonomous_mode_enabled=True))
+            runtime.apply_drive(DriveRequest(speed=15, steering=0, source="browser"))
+            session = runtime.current_session()
+
+            self.assertTrue(session.manual_override_active)
+            self.assertFalse(session.autonomous_mode_active)
 
 
 if __name__ == "__main__":

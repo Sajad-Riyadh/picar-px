@@ -4,42 +4,69 @@ import os
 import threading
 import time
 
+from .config import AppConfig
 from .hardware.camera import CameraService, cv2
-from .models import Detection, VisionSnapshot, utc_now
-
-
-def _find_haarcascade() -> str | None:
-    if cv2 is None:
-        return None
-    filename = "haarcascade_frontalface_default.xml"
-    if hasattr(cv2, "data") and hasattr(cv2.data, "haarcascades"):
-        candidate = cv2.data.haarcascades + filename
-        if os.path.isfile(candidate):
-            return candidate
-    for search_dir in (
-        "/usr/share/opencv4/haarcascades",
-        "/usr/share/opencv/haarcascades",
-        "/usr/local/share/opencv4/haarcascades",
-        "/usr/local/share/OpenCV/haarcascades",
-    ):
-        candidate = os.path.join(search_dir, filename)
-        if os.path.isfile(candidate):
-            return candidate
-    return None
+from .models import Detection, DetectionLabel, SettingsState, VisionSnapshot, utc_now
+from .vision_detectors import (
+    CascadeDetector,
+    DetectorContext,
+    HogPersonDetector,
+    MotionObjectDetector,
+    detection_sort_key,
+    non_max_suppression,
+    remove_overlapping_motion_detections,
+    summarize_labels,
+)
 
 
 class VisionService:
-    def __init__(self, camera: CameraService) -> None:
+    def __init__(self, config: AppConfig, camera: CameraService) -> None:
+        self._config = config
         self._camera = camera
         self._lock = threading.Lock()
         self._running = False
         self._thread: threading.Thread | None = None
+        self._settings = SettingsState()
         self._snapshot = VisionSnapshot(summary="Vision loop is starting.")
-        self._face_cascade = None
-        if cv2 is not None:
-            cascade_path = _find_haarcascade()
-            if cascade_path:
-                self._face_cascade = cv2.CascadeClassifier(cascade_path)
+        self._detectors = (
+            CascadeDetector(
+                label=DetectionLabel.FACE.value,
+                enabled_flag="face_detection_enabled",
+                filenames=("haarcascade_frontalface_default.xml",),
+                source="haar_face",
+                min_size=(40, 40),
+                confidence=0.76,
+            ),
+            CascadeDetector(
+                label=DetectionLabel.PERSON.value,
+                enabled_flag="person_detection_enabled",
+                filenames=("haarcascade_fullbody.xml",),
+                source="haar_fullbody",
+                min_size=(48, 96),
+                confidence=0.68,
+            ),
+            CascadeDetector(
+                label=DetectionLabel.PERSON.value,
+                enabled_flag="person_detection_enabled",
+                filenames=("haarcascade_upperbody.xml",),
+                source="haar_upperbody",
+                min_size=(48, 72),
+                confidence=0.62,
+            ),
+            CascadeDetector(
+                label=DetectionLabel.CAT.value,
+                enabled_flag="cat_detection_enabled",
+                filenames=(
+                    "haarcascade_frontalcatface_extended.xml",
+                    "haarcascade_frontalcatface.xml",
+                ),
+                source="haar_cat",
+                min_size=(48, 48),
+                confidence=0.74,
+            ),
+            HogPersonDetector(enabled=(os.name != "nt" and not config.force_mock_camera)),
+            MotionObjectDetector(config.motion_object_min_area),
+        )
 
     def start(self) -> None:
         if self._running:
@@ -52,6 +79,10 @@ class VisionService:
         self._running = False
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=1.0)
+
+    def set_settings(self, settings: SettingsState) -> None:
+        with self._lock:
+            self._settings = settings.model_copy(deep=True)
 
     def get_snapshot(self) -> VisionSnapshot:
         with self._lock:
@@ -66,42 +97,48 @@ class VisionService:
             snapshot = self._analyse_frame(frame)
             with self._lock:
                 self._snapshot = snapshot
-            time.sleep(0.25)
+            time.sleep(max(self._config.vision_loop_seconds, 0.05))
 
     def _analyse_frame(self, frame) -> VisionSnapshot:
+        with self._lock:
+            settings = self._settings.model_copy(deep=True)
         if frame is None:
             return VisionSnapshot(summary="No camera frame is available yet.")
         frame_height, frame_width = frame.shape[:2]
-        if cv2 is None or self._face_cascade is None or self._face_cascade.empty():
+        if cv2 is None:
             return VisionSnapshot(
-                summary="OpenCV face detection is unavailable.",
+                summary="OpenCV vision support is unavailable.",
+                analyzed_at=utc_now(),
+                frame_width=frame_width,
+                frame_height=frame_height,
+            )
+        if not settings.detection_enabled:
+            return VisionSnapshot(
+                summary="Detection is disabled from settings.",
                 analyzed_at=utc_now(),
                 frame_width=frame_width,
                 frame_height=frame_height,
             )
         grayscale = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        faces = self._face_cascade.detectMultiScale(
-            grayscale,
-            scaleFactor=1.1,
-            minNeighbors=5,
-            minSize=(40, 40),
+        context = DetectorContext(
+            frame=frame,
+            grayscale=grayscale,
+            frame_width=frame_width,
+            frame_height=frame_height,
         )
-        detections = [
-            Detection(
-                label="person_face",
-                confidence=0.65,
-                x=int(x),
-                y=int(y),
-                width=int(w),
-                height=int(h),
-            )
-            for (x, y, w, h) in faces
-        ]
-        detections.sort(key=lambda item: item.width * item.height, reverse=True)
-        summary = self._build_summary(detections, frame_width, frame_height)
+        detections: list[Detection] = []
+        for detector in self._detectors:
+            detections.extend(detector.detect(context, settings))
+        detections = remove_overlapping_motion_detections(
+            non_max_suppression(detections, iou_threshold=0.42)
+        )
+        detections.sort(key=detection_sort_key, reverse=True)
+        detected_labels, counts = summarize_labels(detections)
         return VisionSnapshot(
             detections=detections,
-            summary=summary,
+            detected_labels=detected_labels,
+            counts=counts,
+            summary=self._build_summary(detections, frame_width, frame_height),
             analyzed_at=utc_now(),
             frame_width=frame_width,
             frame_height=frame_height,
@@ -114,7 +151,11 @@ class VisionService:
         frame_height: int,
     ) -> str:
         if not detections:
-            return "No person-like face is currently detected."
+            return "No configured face, person, cat, or object detections are active in the frame."
+        counts = {
+            label: sum(1 for detection in detections if detection.label == label)
+            for label in {detection.label for detection in detections}
+        }
         primary = detections[0]
         center_x = primary.x + primary.width / 2
         center_y = primary.y + primary.height / 2
@@ -128,8 +169,14 @@ class VisionService:
             vertical = "upper"
         elif center_y > frame_height * 0.6:
             vertical = "lower"
-        count = len(detections)
+
+        fragments = []
+        for label in sorted(counts, key=lambda name: (-counts[name], name)):
+            count = counts[label]
+            fragments.append(f"{count} {label}{'' if count == 1 else 's'}")
+        labels_summary = ", ".join(fragments)
+        primary_label = primary.display_label or primary.label.replace("_", " ").title()
         return (
-            f"Detected {count} face(s). "
-            f"The primary face is near the {horizontal}-{vertical} part of the frame."
+            f"Detected {labels_summary}. "
+            f"Primary target: {primary_label} near the {horizontal}-{vertical} part of the frame."
         )

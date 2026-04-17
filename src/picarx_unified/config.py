@@ -75,6 +75,10 @@ class AppConfig:
     greet_cooldown_seconds: float
     tracking_step_degrees: int
     tracking_deadband_px: int
+    vision_loop_seconds: float
+    motion_object_min_area: int
+    autonomous_max_speed: int
+    autonomous_manual_override_seconds: float
     use_mock_hardware: bool
     force_mock_camera: bool
     api_token: str | None
@@ -108,6 +112,13 @@ class AppConfig:
             greet_cooldown_seconds=_env_float("PICARX_GREET_COOLDOWN_SECONDS", 20.0),
             tracking_step_degrees=_env_int("PICARX_TRACKING_STEP_DEGREES", 5),
             tracking_deadband_px=_env_int("PICARX_TRACKING_DEADBAND_PX", 36),
+            vision_loop_seconds=_env_float("PICARX_VISION_LOOP_SECONDS", 0.25),
+            motion_object_min_area=_env_int("PICARX_MOTION_OBJECT_MIN_AREA", 2400),
+            autonomous_max_speed=_env_int("PICARX_AUTONOMOUS_MAX_SPEED", 20),
+            autonomous_manual_override_seconds=_env_float(
+                "PICARX_AUTONOMOUS_MANUAL_OVERRIDE_SECONDS",
+                2.5,
+            ),
             use_mock_hardware=_env_flag("PICARX_USE_MOCK", False),
             force_mock_camera=_env_flag("PICARX_FORCE_MOCK_CAMERA", False),
             api_token=_env_text("PICARX_API_TOKEN"),
