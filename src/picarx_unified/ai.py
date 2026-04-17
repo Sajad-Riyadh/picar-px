@@ -132,8 +132,13 @@ class AIService:
             model=self._config.gemini_live_model,
             config=config,
         ) as session:
-            await session.send_realtime_input(audio=audio)
-            await session.send_realtime_input(audio_stream_end=True)
+            await session.send_client_content(
+                turns=types.Content(
+                    role="user",
+                    parts=[types.Part(inline_data=audio)],
+                ),
+                turn_complete=True,
+            )
             chunks: list[str] = []
             transcript: str | None = None
             async for message in session.receive():
