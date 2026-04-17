@@ -993,8 +993,20 @@ class PiCarDashboard {
 
   defaultVoiceHint(mode) {
     if (mode === "relay") return "Relay mode streams your browser mic to the speaker target.";
-    if (mode === "ai_reply") return "AI Reply records one spoken turn, then speaks the Gemini reply.";
+    if (mode === "ai_reply") return "AI Reply needs browser speech recognition or Gemini server transcription before it can answer.";
     return "Mic idle. Choose Relay or AI Reply to open the voice path.";
+  }
+
+  hasBrowserSpeechRecognition() {
+    return !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+  }
+
+  hasServerTranscription() {
+    return this.state.session?.ai_provider === "gemini-live";
+  }
+
+  canTranscribeAiReplyTurn() {
+    return this.hasBrowserSpeechRecognition() || this.hasServerTranscription();
   }
 
   setButtonActive(button, active) {
@@ -1168,16 +1180,36 @@ class PiCarDashboard {
     this.state.recognition.interimResults = true;
     this.state.recognition.onresult = event => {
       const chunks = [];
-      for (let index = event.resultIndex; index < event.results.length; index += 1) {
+      for (let index = 0; index < event.results.length; index += 1) {
         chunks.push(event.results[index][0].transcript);
       }
       this.state.transcript = chunks.join(" ").trim();
+    };
+    this.state.recognition.onerror = event => {
+      if (this.state.session?.voice_mode !== "ai_reply") return;
+      this.setSpeechStatus(
+        `Browser speech recognition failed${event?.error ? `: ${event.error}` : "."}`,
+        "warn",
+      );
     };
   }
 
   async startTalking() {
     if (this.state.session?.voice_mode === "mute") {
       this.setSpeechStatus("Switch voice mode out of Mute first.", "neutral");
+      return;
+    }
+    if (this.state.session?.voice_mode === "ai_reply" && !this.canTranscribeAiReplyTurn()) {
+      this.setSpeechStatus(
+        "AI Reply needs browser speech recognition or GEMINI_API_KEY-backed server transcription.",
+        "danger",
+      );
+      this.state.openMic = false;
+      this.dom.openMicToggle.checked = false;
+      this.dom.micToggleBtn.textContent = "Open Mic";
+      this.dom.micToggleBtn.classList.remove("btn-danger");
+      this.dom.micToggleBtn.classList.add("btn-accent");
+      this.updateMicBadge();
       return;
     }
     await this.voiceSocket.open();
@@ -1205,6 +1237,17 @@ class PiCarDashboard {
       try {
         this.state.recognition.stop();
       } catch (_) {}
+    }
+    if (
+      this.state.session?.voice_mode === "ai_reply"
+      && !this.state.transcript
+      && !this.hasServerTranscription()
+    ) {
+      this.setSpeechStatus(
+        "No transcript path is available. Use Chrome speech recognition or configure GEMINI_API_KEY.",
+        "danger",
+      );
+      return;
     }
     if (!this.voiceSocket.isOpen()) return;
     if (this.state.transcript) {
