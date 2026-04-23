@@ -176,7 +176,7 @@ That one file will:
 
 1. Install Raspberry Pi OS packages with `apt`
 2. Install the official SunFounder `robot-hat` and `picar-x` Python stack into the project `.venv` when needed
-3. Create or reuse `.venv`
+3. Create or reuse `.venv` with Raspberry Pi system packages visible so `picamera2` works inside the environment
 4. Install this project in editable mode
 5. Create `.env` from `.env.example` on first run
 6. Start the web app
@@ -205,6 +205,14 @@ The script auto-loads `.env` if it exists, so optional settings such as `GEMINI_
 
 ```bash
 cd /path/to/Picar-px
+bash scripts/install_pi.sh
+```
+
+If you created `.venv` manually before using the installer and the UI shows `Camera backend: opencv` with no live frame, recreate the venv through the installer so Pi OS camera packages are visible inside it:
+
+```bash
+cd /path/to/Picar-px
+rm -rf .venv
 bash scripts/install_pi.sh
 ```
 

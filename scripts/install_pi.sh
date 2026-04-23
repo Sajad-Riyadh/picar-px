@@ -190,12 +190,16 @@ install_sunfounder_stack() {
 
 ensure_virtualenv() {
   if [[ ! -d "$VENV_DIR" ]]; then
-    log "Creating Python virtual environment"
-    python3 -m venv "$VENV_DIR"
+    log "Creating Python virtual environment with Raspberry Pi system packages"
+    python3 -m venv --system-site-packages "$VENV_DIR"
   fi
 
   # shellcheck disable=SC1091
   source "$VENV_DIR/bin/activate"
+
+  if python_has_module "picamera2" && ! venv_import_check 'from picamera2 import Picamera2'; then
+    fail "The existing .venv cannot see Raspberry Pi system camera packages. Remove $VENV_DIR and rerun this script so it can be recreated with --system-site-packages."
+  fi
 
   log "Installing Python package and dependencies"
   python -m pip install --upgrade pip setuptools wheel
