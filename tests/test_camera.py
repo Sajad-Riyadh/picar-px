@@ -76,6 +76,40 @@ class CameraServiceTests(unittest.TestCase):
             self.assertIn(b"fresh-frame", frame)
             reader.join(timeout=1.0)
 
+    def test_select_sensor_mode_prefers_scaled_full_fov_mode_over_cropped_target_size(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            camera = CameraService(make_config(Path(tmp_dir)))
+            camera._config.camera_fps = 20
+            sensor_modes = [
+                {"size": (640, 480), "bit_depth": 10, "fps": 58.92},
+                {"size": (1296, 972), "bit_depth": 10, "fps": 43.25},
+                {"size": (2592, 1944), "bit_depth": 10, "fps": 15.63},
+            ]
+
+            selected = camera._select_sensor_mode(sensor_modes)
+
+            self.assertIsNotNone(selected)
+            self.assertEqual(selected["size"], (1296, 972))
+
+    def test_build_picamera_sensor_config_uses_selected_mode(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            camera = CameraService(make_config(Path(tmp_dir)))
+
+            class FakePicamera:
+                sensor_modes = [
+                    {"size": (640, 480), "bit_depth": 10, "fps": 58.92},
+                    {"size": (1296, 972), "bit_depth": 10, "fps": 43.25},
+                ]
+
+            camera._picamera = FakePicamera()
+
+            sensor_config = camera._build_picamera_sensor_config()
+
+            self.assertEqual(
+                sensor_config,
+                {"output_size": (1296, 972), "bit_depth": 10},
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
