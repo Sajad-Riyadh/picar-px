@@ -175,7 +175,7 @@ bash scripts/install_pi.sh
 That one file will:
 
 1. Install Raspberry Pi OS packages with `apt`
-2. Install the official SunFounder PiCar-X Python stack when needed
+2. Install the official SunFounder `robot-hat` and `picar-x` Python stack into the project `.venv` when needed
 3. Create or reuse `.venv`
 4. Install this project in editable mode
 5. Create `.env` from `.env.example` on first run

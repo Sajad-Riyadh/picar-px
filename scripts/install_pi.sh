@@ -37,7 +37,7 @@ Usage:
 
 What it does by default:
   1. Installs required Raspberry Pi OS packages
-  2. Installs the official SunFounder PiCar-X Python stack if needed
+  2. Installs the official SunFounder Robot HAT and PiCar-X Python stack if needed
   3. Creates/updates the local virtual environment
   4. Copies .env.example to .env on first run
   5. Launches the app
@@ -109,6 +109,21 @@ raise SystemExit(0 if importlib.util.find_spec(module) else 1)
 PY
 }
 
+venv_python() {
+  [[ -x "$VENV_DIR/bin/python" ]] || fail "Virtual environment is missing. Expected: $VENV_DIR"
+  "$VENV_DIR/bin/python" "$@"
+}
+
+venv_pip() {
+  [[ -x "$VENV_DIR/bin/python" ]] || fail "Virtual environment is missing. Expected: $VENV_DIR"
+  "$VENV_DIR/bin/python" -m pip "$@"
+}
+
+venv_import_check() {
+  local snippet="$1"
+  venv_python -c "$snippet" >/dev/null 2>&1
+}
+
 install_system_packages() {
   log "Installing Raspberry Pi OS packages"
   run_root apt update
@@ -117,6 +132,8 @@ install_system_packages() {
     python3 \
     python3-venv \
     python3-pip \
+    python3-setuptools \
+    python3-smbus \
     python3-opencv \
     python3-picamera2 \
     espeak-ng \
@@ -128,24 +145,37 @@ install_sunfounder_stack() {
     return
   fi
 
-  if python_has_module "picarx"; then
+  if venv_import_check 'from robot_hat import ADC, PWM, Servo, fileDB' \
+    && venv_import_check 'from picarx import Picarx'; then
     log "Official SunFounder PiCar-X Python stack already installed"
     return
   fi
 
-  log "Installing official SunFounder PiCar-X Python stack"
+  log "Installing official SunFounder Robot HAT and PiCar-X Python stack into .venv"
   local tmp_dir
   tmp_dir="$(mktemp -d /tmp/picarx-unified-sunfounder-XXXXXX)"
 
-  git clone --depth 1 -b v2.0 https://github.com/SunFounder/picar-x.git "$tmp_dir"
+  venv_pip uninstall -y robot-hat robot_hat picarx >/dev/null 2>&1 || true
+
+  git clone --depth 1 -b v2.0 https://github.com/SunFounder/robot-hat.git "$tmp_dir/robot-hat"
   (
-    cd "$tmp_dir"
-    run_root python3 -m pip install .
+    cd "$tmp_dir/robot-hat"
+    venv_pip install .
+  )
+
+  git clone --depth 1 -b v2.0 https://github.com/SunFounder/picar-x.git "$tmp_dir/picar-x"
+  (
+    cd "$tmp_dir/picar-x"
+    venv_pip install .
   )
   rm -rf "$tmp_dir"
 
-  if ! python_has_module "picarx"; then
-    fail "SunFounder PiCar-X stack installation finished but the 'picarx' module is still unavailable."
+  if ! venv_import_check 'from robot_hat import ADC, PWM, Servo, fileDB'; then
+    fail "SunFounder installation finished but the venv still does not provide the expected robot_hat API."
+  fi
+
+  if ! venv_import_check 'from picarx import Picarx'; then
+    fail "SunFounder installation finished but the venv still cannot import picarx.Picarx."
   fi
 }
 
@@ -233,8 +263,8 @@ run_application() {
 main() {
   if (( INSTALL_DEPS )); then
     install_system_packages
-    install_sunfounder_stack
     ensure_virtualenv
+    install_sunfounder_stack
     ensure_env_file
     prepare_runtime_env
   fi
