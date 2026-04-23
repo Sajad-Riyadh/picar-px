@@ -124,6 +124,23 @@ venv_import_check() {
   venv_python -c "$snippet" >/dev/null 2>&1
 }
 
+install_python_runtime_packages() {
+  log "Installing Python app dependencies into .venv without replacing Pi OS camera packages"
+  venv_pip uninstall -y \
+    numpy \
+    opencv-python \
+    opencv-python-headless \
+    opencv-contrib-python \
+    simplejpeg >/dev/null 2>&1 || true
+  venv_pip install \
+    "fastapi>=0.115.0" \
+    "uvicorn[standard]>=0.30.0" \
+    "filelock>=3.16.1" \
+    "pydantic>=2.9.0" \
+    "google-genai>=1.72.0"
+  venv_pip install --no-deps -e "$PROJECT_DIR"
+}
+
 install_system_packages() {
   log "Installing Raspberry Pi OS packages"
   run_root apt update
@@ -201,9 +218,9 @@ ensure_virtualenv() {
     fail "The existing .venv cannot see Raspberry Pi system camera packages. Remove $VENV_DIR and rerun this script so it can be recreated with --system-site-packages."
   fi
 
-  log "Installing Python package and dependencies"
+  log "Installing Python package tooling"
   python -m pip install --upgrade pip setuptools wheel
-  pip install -e "$PROJECT_DIR"
+  install_python_runtime_packages
 }
 
 ensure_env_file() {

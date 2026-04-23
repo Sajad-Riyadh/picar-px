@@ -177,7 +177,7 @@ That one file will:
 1. Install Raspberry Pi OS packages with `apt`
 2. Install the official SunFounder `robot-hat` and `picar-x` Python stack into the project `.venv` when needed
 3. Create or reuse `.venv` with Raspberry Pi system packages visible so `picamera2` works inside the environment
-4. Install this project in editable mode
+4. Install this project in editable mode without replacing Raspberry Pi OS camera packages such as `numpy`, `simplejpeg`, and `picamera2`
 5. Create `.env` from `.env.example` on first run
 6. Start the web app
 
@@ -214,6 +214,14 @@ If you created `.venv` manually before using the installer and the UI shows `Cam
 cd /path/to/Picar-px
 rm -rf .venv
 bash scripts/install_pi.sh
+```
+
+If `picamera2` raises a `numpy.dtype size changed` error, the venv has pip-installed `numpy` or OpenCV wheels shadowing the Raspberry Pi OS camera stack. Recreate the venv with the installer so it uses the Pi OS camera packages again:
+
+```bash
+cd /path/to/Picar-px
+rm -rf .venv
+bash scripts/install_pi.sh --install-only
 ```
 
 If you want optional cloud AI features:
