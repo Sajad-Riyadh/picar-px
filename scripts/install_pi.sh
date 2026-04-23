@@ -128,14 +128,17 @@ install_system_packages() {
   log "Installing Raspberry Pi OS packages"
   run_root apt update
   run_root apt install -y \
+    build-essential \
     git \
     python3 \
+    python3-dev \
     python3-venv \
     python3-pip \
     python3-setuptools \
     python3-smbus \
     python3-opencv \
     python3-picamera2 \
+    portaudio19-dev \
     espeak-ng \
     alsa-utils
 }
@@ -156,6 +159,7 @@ install_sunfounder_stack() {
   tmp_dir="$(mktemp -d /tmp/picarx-unified-sunfounder-XXXXXX)"
 
   venv_pip uninstall -y robot-hat robot_hat picarx >/dev/null 2>&1 || true
+  venv_pip install pyaudio
 
   git clone --depth 1 -b v2.0 https://github.com/SunFounder/robot-hat.git "$tmp_dir/robot-hat"
   (
