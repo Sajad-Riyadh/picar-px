@@ -135,6 +135,31 @@ class RobotRuntimeTests(unittest.TestCase):
             self.assertTrue(session.manual_override_active)
             self.assertFalse(session.autonomous_mode_active)
 
+    def test_steering_only_command_turns_wheels_without_drive_motion(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            runtime = RobotRuntime(make_config(Path(tmp_dir)))
+
+            session = runtime.apply_drive(DriveRequest(speed=0, steering=20, source="browser"))
+            hardware = runtime.hardware.snapshot()
+
+            self.assertEqual(session.drive.speed, 0)
+            self.assertEqual(session.drive.steering, 20)
+            self.assertEqual(hardware.drive_speed, 0)
+            self.assertEqual(hardware.steering, 20)
+
+    def test_clear_emergency_stop_releases_estop_without_restoring_motion(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            runtime = RobotRuntime(make_config(Path(tmp_dir)))
+
+            runtime.trigger_emergency_stop("Test stop.")
+            session = runtime.clear_emergency_stop()
+            hardware = runtime.hardware.snapshot()
+
+            self.assertFalse(session.emergency_stop)
+            self.assertEqual(session.drive.speed, 0)
+            self.assertEqual(session.drive.steering, 0)
+            self.assertEqual(hardware.drive_speed, 0)
+
 
 if __name__ == "__main__":
     unittest.main()

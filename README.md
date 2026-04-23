@@ -2,7 +2,7 @@
 
 ## 1. Architecture overview
 
-This project is a unified control stack for a SunFounder PiCar-X running on a Raspberry Pi 5. It is designed to stay compatible with the official `picarx.Picarx` hardware API while borrowing the good architectural ideas from [SPARK](https://github.com/adrianwedd/spark): strong separation of concerns, stateful services, safety-first orchestration, a browser-accessible API, and a voice loop that is distinct from low-level hardware control.
+This project is a unified control stack for a SunFounder PiCar-X running on a Raspberry Pi 5. It stays compatible with the official `picarx.Picarx` hardware API while keeping the robot software split into clear service boundaries: safety-first orchestration, browser-accessible control APIs, camera and vision services, and a voice loop that remains separate from low-level hardware control.
 
 ### Core engineering decisions
 
@@ -10,8 +10,9 @@ This project is a unified control stack for a SunFounder PiCar-X running on a Ra
 - The web backend is FastAPI, because it gives clean REST endpoints, MJPEG streaming, and a WebSocket for browser audio.
 - Voice, safety, motion, camera, vision, and behaviors are separate modules so later Wi-Fi and cybersecurity features can slot in without rewriting the robot core.
 - AI is intentionally fenced away from direct motor commands. The AI can answer questions and generate speech, but the drive API is still guarded as a manual control path.
-- The person-aware behavior in v1 uses onboard face detection as a practical stand-in for generic person detection. That is the most reliable lightweight option on a Pi 5 without assuming an AI Camera.
-- Browser voice uses chunked WebSocket audio plus browser speech recognition when available. That is a much more practical first version than full WebRTC while still enabling relay mode and AI reply mode.
+- The person-aware behavior uses onboard face detection as a practical stand-in for generic person detection. That is the most reliable lightweight option on a Pi 5 without assuming an AI Camera.
+- Browser voice uses chunked WebSocket audio plus browser speech recognition when available. That is a more practical starting point than full WebRTC while still enabling relay mode and AI reply mode.
+- Manual steering-only commands are supported. Left or right input can turn the front wheels without forcing forward or reverse motion, while combined forward/backward plus steering inputs still drive and turn normally.
 
 ### Layered design
 
@@ -46,26 +47,7 @@ Browser UI / SSH curl
 - `AudioRouter` decides whether sound goes to the car speaker, the browser speaker, or both.
 - `VoiceConnection` handles browser microphone chunks, relay mode, AI reply mode, and transcript handoff.
 
-## 2. What to take from SPARK
-
-Take these ideas from [SPARK](https://github.com/adrianwedd/spark):
-
-- The overall layering: hardware adapters, state/session handling, API surface, voice loop, and higher-level behaviors should be separate.
-- File-backed session state with locking, so browser state survives restarts and service modules do not stomp on one another.
-- A safety-first attitude: validate commands before execution, keep a watchdog, and make emergency stop a first-class concept.
-- Environment-driven configuration instead of scattering constants across the codebase.
-- A clean API boundary where high-level commands go through one orchestration layer instead of every module talking to every other module.
-- The separation between a reactive voice path and background robot behaviors.
-
-Do **not** take these parts directly from SPARK:
-
-- Persona-specific prompts, child-companion behavior, and model-specific launch scripts.
-- The exact tool runner model, CLI wrappers, or Codex/Claude-specific voice bridge details.
-- SPARK-specific robot affordances that are unrelated to your PiCar-X use case.
-
-In other words: keep the architecture, not the product identity.
-
-## 3. What to take from the official PiCar-X project
+## 2. What to take from the official PiCar-X project
 
 Take these parts from the official [SunFounder PiCar-X repository](https://github.com/SunFounder/picar-x) and [SunFounder PiCar-X documentation](https://docs.sunfounder.com/projects/picar-x-v20/en/latest/):
 
@@ -77,7 +59,7 @@ Take these parts from the official [SunFounder PiCar-X repository](https://githu
 
 Do **not** replace these with scratch-built low-level drivers unless you are intentionally forking away from SunFounder compatibility.
 
-## 4. Full project structure
+## 3. Full project structure
 
 ```text
 Picar-px/
@@ -117,9 +99,9 @@ Picar-px/
             └── styles.css
 ```
 
-## 5. Full code for the first version
+## 4. Full code for the current version
 
-The full first-version implementation is the checked-in code in this repository. The primary entry points are:
+The full implementation is the checked-in code in this repository. The primary entry points are:
 
 - [`src/picarx_unified/app.py`](src/picarx_unified/app.py): FastAPI app, REST routes, MJPEG stream, WebSocket voice endpoint.
 - [`src/picarx_unified/runtime.py`](src/picarx_unified/runtime.py): system orchestration, browser session state, watchdog, emergency stop, AI turn handling.
@@ -135,9 +117,10 @@ The full first-version implementation is the checked-in code in this repository.
 - [`src/picarx_unified/static/app.js`](src/picarx_unified/static/app.js): browser controls, push-to-talk, playback, state refresh.
 - [`src/picarx_unified/static/pcm-worklet.js`](src/picarx_unified/static/pcm-worklet.js): microphone PCM capture worklet.
 
-### Features included in v1
+### Features included
 
 - Drive control
+- Steering-only front wheel control with keyboard and on-screen inputs
 - Camera pan/tilt control
 - Camera streaming to the browser
 - Relay mode
@@ -147,10 +130,11 @@ The full first-version implementation is the checked-in code in this repository.
 - Vision question endpoint
 - Greeting behavior when a person-like face is detected
 - Emergency stop
+- Explicit emergency-stop release controls in the UI
 - Ultrasonic and watchdog safety limits
 - Optional bearer-token protection
 
-## 6. Explanation of each file
+## 5. Explanation of each file
 
 - `pyproject.toml`: Python packaging and install metadata.
 - `requirements.txt`: direct dependency list.
@@ -160,7 +144,7 @@ The full first-version implementation is the checked-in code in this repository.
 - `deploy/picarx-unified.service`: `systemd` unit file for boot-time startup.
 - `src/picarx_unified/config.py`: central environment-backed configuration object.
 - `src/picarx_unified/models.py`: Pydantic request/response/session models.
-- `src/picarx_unified/state.py`: locked JSON session persistence inspired by SPARK’s state separation.
+- `src/picarx_unified/state.py`: locked JSON session persistence for browser-visible runtime state.
 - `src/picarx_unified/safety.py`: speed/steering/pan/tilt clamping and motion blocking rules.
 - `src/picarx_unified/hardware/picarx_adapter.py`: official PiCar-X wrapper plus mock backend.
 - `src/picarx_unified/hardware/camera.py`: camera source abstraction with Picamera2, OpenCV, or mock fallback.
@@ -177,7 +161,7 @@ The full first-version implementation is the checked-in code in this repository.
 - `src/picarx_unified/static/app.js`: frontend control logic.
 - `src/picarx_unified/static/pcm-worklet.js`: raw microphone capture worklet for low-latency chunking.
 
-## 7. Installation and run steps
+## 6. Installation and run steps
 
 ### One-file install and run
 
@@ -317,14 +301,15 @@ If you enable `PICARX_API_TOKEN`, add:
 1. Start the service and confirm `GET /api/health` returns `ok: true`.
 2. Open the browser UI and confirm the MJPEG stream loads.
 3. Move the pan/tilt sliders and confirm the camera servos respond.
-4. Tap each drive button briefly and confirm motion starts and stops cleanly.
-5. Put an object close in front of the ultrasonic sensor and verify forward motion is blocked.
-6. Trigger emergency stop and verify all motion commands are rejected until reset.
-7. Set `Relay` mode, choose `car`, press and hold the talk button, and confirm your browser mic audio plays through the car speaker.
-8. Set `Relay` mode, choose `browser`, press and hold the talk button, and confirm you hear the relayed audio in your computer speakers.
-9. Set `AI Reply` mode, speak a short phrase, and confirm the transcript appears and the reply is spoken to the selected target.
-10. Ask a vision question from the browser or `curl` and confirm the answer matches the live scene summary.
-11. Stand in front of the camera and confirm the pan/tilt tries to center your face and greets on cooldown.
+4. Tap the left and right controls by themselves and confirm the front wheels steer without driving the chassis forward or backward.
+5. Hold forward plus left/right and backward plus left/right and confirm the car moves while turning as expected.
+6. Put an object close in front of the ultrasonic sensor and verify forward motion is blocked.
+7. Trigger emergency stop and verify all motion commands are rejected until you explicitly release it from the banner, safety panel, or settings panel.
+8. Set `Relay` mode, choose `car`, press and hold the talk button, and confirm your browser mic audio plays through the car speaker.
+9. Set `Relay` mode, choose `browser`, press and hold the talk button, and confirm you hear the relayed audio in your computer speakers.
+10. Set `AI Reply` mode, speak a short phrase, and confirm the transcript appears and the reply is spoken to the selected target.
+11. Ask a vision question from the browser or `curl` and confirm the answer matches the live scene summary.
+12. Stand in front of the camera and confirm the pan/tilt tries to center your face and greets on cooldown.
 
 ### Systemd startup
 
@@ -339,7 +324,7 @@ sudo systemctl status picarx-unified.service
 
 The service runs the same bootstrap script in `--run-only` mode, so the manual flow and boot flow stay aligned.
 
-## 8. Future improvements
+## 7. Future improvements
 
 - Replace Haar face detection with a Pi-friendly detector such as MediaPipe or a lightweight YOLO model once you confirm performance on your Pi 5.
 - Upgrade the chunked WebSocket voice path to WebRTC if you need lower latency and built-in echo cancellation.

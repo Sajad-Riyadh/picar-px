@@ -66,11 +66,11 @@
             <span class="badge" id="drive-badge">Stopped</span>
           </div>
           <div class="dpad-grid">
-            <button class="dpad up" data-speed-sign="1" data-steering="0">&#9650;</button>
-            <button class="dpad left" data-speed-sign="1" data-steering="-25">&#9664;</button>
-            <button class="dpad center" data-speed-sign="0" data-steering="0">&#9632;</button>
-            <button class="dpad right" data-speed-sign="1" data-steering="25">&#9654;</button>
-            <button class="dpad down" data-speed-sign="-1" data-steering="0">&#9660;</button>
+            <button class="dpad up" data-drive-control="forward">&#9650;</button>
+            <button class="dpad left" data-drive-control="left">&#9664;</button>
+            <button class="dpad center" data-drive-control="stop">&#9632;</button>
+            <button class="dpad right" data-drive-control="right">&#9654;</button>
+            <button class="dpad down" data-drive-control="backward">&#9660;</button>
           </div>
           <div class="slider-row">
             <span>SPD</span>
@@ -409,9 +409,20 @@
           </details>
 
           <details class="sgroup">
+            <summary>Safety Recovery</summary>
+            <div class="sfields">
+              <p id="settings-estop-status" class="hint-text">Emergency stop is clear. Manual drive and autonomy are available when other safety checks pass.</p>
+              <div class="quick-row">
+                <button type="button" id="settings-estop-trigger-btn" class="btn btn-danger btn-full">Trigger Emergency Stop</button>
+                <button type="button" id="settings-estop-release-btn" class="btn btn-outline btn-full">Release Emergency Stop</button>
+              </div>
+            </div>
+          </details>
+
+          <details class="sgroup">
             <summary>Keyboard Shortcuts</summary>
             <div class="sfields">
-              <p class="hint-text">Hold <strong>W A S D</strong> to drive. Release to stop. Manual control always takes priority over autonomy.</p>
+              <p class="hint-text">Hold <strong>W</strong> or <strong>S</strong> to drive, and add <strong>A</strong> or <strong>D</strong> to turn while moving. Press <strong>A</strong> or <strong>D</strong> alone to steer the front wheels without moving the car. Manual control always takes priority over autonomy.</p>
             </div>
           </details>
 
@@ -428,7 +439,7 @@
         </div>
         <div class="safety-actions">
           <button type="button" id="settings-estop-btn" class="btn btn-danger btn-full">Trigger Emergency Stop</button>
-          <button type="button" id="settings-reset-btn" class="btn btn-outline btn-full">Reset Emergency Stop</button>
+          <button type="button" id="settings-reset-btn" class="btn btn-outline btn-full">Release Emergency Stop</button>
         </div>
       </section>
     </div>

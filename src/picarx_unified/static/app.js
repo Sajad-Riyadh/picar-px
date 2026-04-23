@@ -64,7 +64,10 @@ function formatTimestamp(value) {
 }
 
 function formatDriveSummary(drive) {
-  if (!drive || drive.speed === 0) return "Stopped";
+  if (!drive) return "Stopped";
+  if (drive.speed === 0) {
+    return drive.steering === 0 ? "Stopped" : `Steer ${signed(drive.steering)}`;
+  }
   const direction = drive.speed > 0 ? "Fwd" : "Rev";
   return drive.steering === 0
     ? `${direction} ${Math.abs(drive.speed)}`
@@ -122,7 +125,7 @@ class DomRegistry {
     this.driveSpeedValue = $("#drive-speed-value");
     this.stopBtn = $("#stop-btn");
     this.lastErrorLabel = $("#last-error-label");
-    this.dpadBtns = $$(".dpad[data-speed-sign]");
+    this.dpadBtns = $$(".dpad[data-drive-control]");
 
     this.centerCameraBtn = $("#center-camera-btn");
     this.camUp = $("#cam-up");
@@ -201,6 +204,9 @@ class DomRegistry {
     this.autonomousStopDistanceValue = $("#autonomous-stop-distance-value");
     this.settingsEstopBtn = $("#settings-estop-btn");
     this.settingsResetBtn = $("#settings-reset-btn");
+    this.settingsEstopTriggerBtn = $("#settings-estop-trigger-btn");
+    this.settingsEstopReleaseBtn = $("#settings-estop-release-btn");
+    this.settingsEstopStatus = $("#settings-estop-status");
     this.settingsSaveStatus = $("#settings-save-status");
 
     this.menuBtn = $("#menu-btn");
@@ -380,6 +386,16 @@ class SessionRenderer {
     if (this.dom.aiProviderLabel) this.dom.aiProviderLabel.textContent = titleCase(session.ai_provider);
     if (this.dom.lastBehaviorLabel) this.dom.lastBehaviorLabel.textContent = session.last_behavior_action || session.last_autonomy_action || "None";
     if (this.dom.lastGreetingLabel) this.dom.lastGreetingLabel.textContent = session.last_greeting_text || "No greeting yet.";
+    if (this.dom.settingsEstopStatus) {
+      this.dom.settingsEstopStatus.textContent = session.emergency_stop
+        ? "Emergency stop is active. Motion stays blocked until you explicitly release it."
+        : "Emergency stop is clear. Manual drive and autonomy are available when other safety checks pass.";
+    }
+    if (this.dom.settingsEstopTriggerBtn) this.dom.settingsEstopTriggerBtn.disabled = session.emergency_stop;
+    if (this.dom.settingsEstopBtn) this.dom.settingsEstopBtn.disabled = session.emergency_stop;
+    if (this.dom.settingsEstopReleaseBtn) this.dom.settingsEstopReleaseBtn.disabled = !session.emergency_stop;
+    if (this.dom.settingsResetBtn) this.dom.settingsResetBtn.disabled = !session.emergency_stop;
+    if (this.dom.estopResetBtn) this.dom.estopResetBtn.disabled = !session.emergency_stop;
 
     this.dom.voiceModeSelect.value = session.voice_mode;
     this.dom.audioTargetSelect.value = session.audio_target;
@@ -683,9 +699,21 @@ class DriveController {
     return Number(this.dom.driveSpeedSlider.value);
   }
 
-  buildDriveCommand(speedSign, steering, source) {
-    if (speedSign === 0) return { speed: 0, steering: 0, source };
-    return { speed: this.currentDriveSpeed() * speedSign, steering, source };
+  deriveDriveCommand() {
+    const browserInput = this.state.browserDriveInput;
+    const keyboardInput = this.state.keyboardDriveInput;
+    const forward = browserInput.forward > 0 || keyboardInput.forward;
+    const backward = browserInput.backward > 0 || keyboardInput.backward;
+    const left = browserInput.left > 0 || keyboardInput.left;
+    const right = browserInput.right > 0 || keyboardInput.right;
+    const speedSign = Number(forward) - Number(backward);
+    const steeringSign = Number(right) - Number(left);
+    if (speedSign === 0 && steeringSign === 0) return null;
+    return {
+      speed: this.currentDriveSpeed() * speedSign,
+      steering: steeringSign * 25,
+      source: browserInput.activeCount > 0 ? "browser" : "keyboard",
+    };
   }
 
   async sendDriveFast(command) {
@@ -695,9 +723,7 @@ class DriveController {
     });
     if (this.dom.hudDrive) this.dom.hudDrive.textContent = `SPD ${signed(command.speed)} / STR ${signed(command.steering)}`;
     if (this.dom.driveBadge) {
-      this.dom.driveBadge.textContent = command.speed === 0
-        ? "Stopped"
-        : `${command.speed > 0 ? "Fwd" : "Rev"} ${Math.abs(command.speed)}${command.steering ? ` / str ${signed(command.steering)}` : ""}`;
+      this.dom.driveBadge.textContent = formatDriveSummary(command);
     }
   }
 
@@ -706,10 +732,6 @@ class DriveController {
     this.state.driveInterval = null;
     this.state.driveCommand = null;
     this.state.driveBusy = false;
-    if (this.state.activeDriveButton) {
-      this.callbacks.setButtonActive(this.state.activeDriveButton, false);
-      this.state.activeDriveButton = null;
-    }
   }
 
   async stopDriveLoop() {
@@ -732,18 +754,14 @@ class DriveController {
     ) {
       return;
     }
-    this.clearDriveLoop();
     this.state.driveCommand = command;
-    if (button) {
-      this.state.activeDriveButton = button;
-      this.callbacks.setButtonActive(button, true);
-    }
+    if (this.state.driveBusy || this.state.driveInterval) return;
 
     const tick = async () => {
       if (!this.state.driveCommand) return;
       this.state.driveBusy = true;
       try {
-        await this.sendDriveFast(command);
+        await this.sendDriveFast(this.state.driveCommand);
       } catch (error) {
         this.clearDriveLoop();
         this.callbacks.setSpeechStatus(error.message, "danger");
@@ -759,44 +777,86 @@ class DriveController {
     tick();
   }
 
-  bindDriveButton(button, bindMomentaryPointerControl) {
-    const speedSign = Number(button.dataset.speedSign);
-    const steering = Number(button.dataset.steering);
-    if (speedSign === 0 && steering === 0) {
-      button.addEventListener("click", () => this.stopDriveLoop().catch(() => null));
+  async syncDriveLoop() {
+    const command = this.deriveDriveCommand();
+    if (!command) {
+      await this.stopDriveLoop();
       return;
     }
+    await this.startDriveLoop(command);
+  }
+
+  setBrowserDriveInput(control, active, button) {
+    if (control === "stop") {
+      if (active) {
+        this.resetManualDriveInput();
+      }
+      return this.syncDriveLoop();
+    }
+    const browserInput = this.state.browserDriveInput;
+    const nextValue = Math.max(0, (browserInput[control] ?? 0) + (active ? 1 : -1));
+    browserInput.activeCount += active ? 1 : -1;
+    browserInput.activeCount = Math.max(0, browserInput.activeCount);
+    browserInput[control] = nextValue;
+    this.callbacks.setButtonActive(button, active);
+    return this.syncDriveLoop();
+  }
+
+  setKeyboardDriveInput(control, active) {
+    this.state.keyboardDriveInput[control] = active;
+    return this.syncDriveLoop();
+  }
+
+  resetManualDriveInput() {
+    this.state.browserDriveInput = {
+      forward: 0,
+      backward: 0,
+      left: 0,
+      right: 0,
+      activeCount: 0,
+    };
+    this.state.keyboardDriveInput = {
+      forward: false,
+      backward: false,
+      left: false,
+      right: false,
+    };
+    this.dom.dpadBtns.forEach(button => this.callbacks.setButtonActive(button, false));
+  }
+
+  bindDriveButton(button, bindMomentaryPointerControl) {
+    const control = String(button.dataset.driveControl || "").trim();
     bindMomentaryPointerControl(button, {
-      start: () => this.startDriveLoop(this.buildDriveCommand(speedSign, steering, "browser"), button),
-      stop: () => this.stopDriveLoop(),
+      start: () => this.setBrowserDriveInput(control, true, button),
+      stop: () => this.setBrowserDriveInput(control, false, button),
     });
   }
 
   bindKeyboard() {
     const keyMap = {
-      w: () => this.buildDriveCommand(1, 0, "keyboard"),
-      a: () => this.buildDriveCommand(1, -25, "keyboard"),
-      d: () => this.buildDriveCommand(1, 25, "keyboard"),
-      s: () => this.buildDriveCommand(-1, 0, "keyboard"),
+      w: "forward",
+      a: "left",
+      d: "right",
+      s: "backward",
     };
 
     window.addEventListener("keydown", event => {
       const key = event.key.toLowerCase();
-      if (!keyMap[key] || this.state.activeKey === key || event.repeat) return;
+      const control = keyMap[key];
+      if (!control || event.repeat || this.state.keyboardDriveInput[control]) return;
       if (["INPUT", "SELECT", "TEXTAREA"].includes(event.target.tagName)) return;
-      this.state.activeKey = key;
       event.preventDefault();
-      this.startDriveLoop(keyMap[key]()).catch(() => null);
+      this.setKeyboardDriveInput(control, true).catch(() => null);
     });
 
     window.addEventListener("keyup", event => {
-      if (event.key.toLowerCase() !== this.state.activeKey) return;
-      this.state.activeKey = null;
-      this.stopDriveLoop().catch(() => null);
+      const control = keyMap[event.key.toLowerCase()];
+      if (!control || !this.state.keyboardDriveInput[control]) return;
+      this.setKeyboardDriveInput(control, false).catch(() => null);
     });
 
     window.addEventListener("blur", () => {
-      this.state.activeKey = null;
+      this.resetManualDriveInput();
       this.stopDriveLoop().catch(() => null);
     });
   }
@@ -932,8 +992,19 @@ class PiCarDashboard {
       driveInterval: null,
       driveCommand: null,
       driveBusy: false,
-      activeDriveButton: null,
-      activeKey: null,
+      browserDriveInput: {
+        forward: 0,
+        backward: 0,
+        left: 0,
+        right: 0,
+        activeCount: 0,
+      },
+      keyboardDriveInput: {
+        forward: false,
+        backward: false,
+        left: false,
+        right: false,
+      },
       lastWsRender: 0,
       refreshPromise: null,
       refreshQueued: false,
@@ -1364,12 +1435,14 @@ class PiCarDashboard {
         await this.applySessionAction(ENDPOINTS.emergencyReset);
         return;
       }
+      this.driveController.resetManualDriveInput();
       this.driveController.clearDriveLoop();
       await this.applySessionAction(ENDPOINTS.emergencyStop);
     });
     this.dom.estopResetBtn.addEventListener("click", () => this.applySessionAction(ENDPOINTS.emergencyReset));
 
     this.dom.stopBtn.addEventListener("click", async () => {
+      this.driveController.resetManualDriveInput();
       this.driveController.clearDriveLoop();
       await this.applySessionAction(ENDPOINTS.driveStop);
     });
@@ -1461,10 +1534,17 @@ class PiCarDashboard {
       }
     });
     this.dom.settingsEstopBtn.addEventListener("click", async () => {
+      this.driveController.resetManualDriveInput();
       this.driveController.clearDriveLoop();
       await this.applySessionAction(ENDPOINTS.emergencyStop);
     });
     this.dom.settingsResetBtn.addEventListener("click", () => this.applySessionAction(ENDPOINTS.emergencyReset));
+    this.dom.settingsEstopTriggerBtn.addEventListener("click", async () => {
+      this.driveController.resetManualDriveInput();
+      this.driveController.clearDriveLoop();
+      await this.applySessionAction(ENDPOINTS.emergencyStop);
+    });
+    this.dom.settingsEstopReleaseBtn.addEventListener("click", () => this.applySessionAction(ENDPOINTS.emergencyReset));
   }
 
   async init() {
