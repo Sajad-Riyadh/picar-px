@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import os
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
+import picarx_unified.config as config_module
 from picarx_unified.config import AppConfig, PROJECT_ROOT
 
 
@@ -30,6 +33,29 @@ class AppConfigTests(unittest.TestCase):
         self.assertEqual(config.gemini_api_key, "gemini-test")
         self.assertEqual(config.voice_capture_max_seconds, 7.5)
         self.assertEqual(config.gemini_transcription_model, "gemini-2.5-flash")
+
+    def test_from_env_loads_project_dotenv_without_overriding_real_environment(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            project_root = Path(tmp_dir)
+            (project_root / ".env").write_text(
+                "\n".join(
+                    [
+                        'GEMINI_API_KEY="dotenv-key"',
+                        "PICARX_CAMERA_WIDTH=1296",
+                        "PICARX_CAMERA_HEIGHT=972",
+                        "PICARX_CAMERA_FPS=20",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            with patch.object(config_module, "PROJECT_ROOT", project_root):
+                with patch.dict(os.environ, {"PICARX_CAMERA_WIDTH": "800"}, clear=True):
+                    config = AppConfig.from_env()
+
+        self.assertEqual(config.gemini_api_key, "dotenv-key")
+        self.assertEqual(config.camera_width, 800)
+        self.assertEqual(config.camera_height, 972)
+        self.assertEqual(config.camera_fps, 20)
 
 
 if __name__ == "__main__":

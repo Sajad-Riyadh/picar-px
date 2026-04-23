@@ -8,6 +8,29 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
+def _load_env_file(path: Path) -> None:
+    if not path.exists():
+        return
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, value = stripped.split("=", 1)
+        key = key.strip()
+        value = value.strip()
+        if not key or key in os.environ:
+            continue
+        if (value.startswith('"') and value.endswith('"')) or (
+            value.startswith("'") and value.endswith("'")
+        ):
+            value = value[1:-1]
+        os.environ[key] = value
+
+
 def _env_flag(name: str, default: bool = False) -> bool:
     value = os.getenv(name)
     if value is None:
@@ -89,6 +112,7 @@ class AppConfig:
 
     @classmethod
     def from_env(cls) -> "AppConfig":
+        _load_env_file(PROJECT_ROOT / ".env")
         state_dir = _env_path("PICARX_STATE_DIR", PROJECT_ROOT / "state")
         static_dir = _env_path("PICARX_STATIC_DIR", Path(__file__).resolve().parent / "static")
         return cls(
