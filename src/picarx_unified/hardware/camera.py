@@ -143,13 +143,11 @@ class CameraService:
         if not self._config.force_mock_camera and Picamera2 is not None:
             try:
                 self._picamera = Picamera2()
-                sensor_config = self._build_picamera_sensor_config()
                 configuration = self._picamera.create_video_configuration(
                     main={
                         "size": (self._config.camera_width, self._config.camera_height),
                         "format": "BGR888",
-                    },
-                    sensor=sensor_config,
+                    }
                 )
                 self._picamera.configure(configuration)
                 self._picamera.start()
@@ -173,62 +171,6 @@ class CameraService:
                 logger.exception("OpenCV camera initialization failed; using mock camera backend.")
         self._backend_name = "mock"
         logger.warning("Camera backend is using mock frames.")
-
-    def _build_picamera_sensor_config(self) -> dict[str, Any] | None:
-        sensor_modes = getattr(self._picamera, "sensor_modes", None)
-        if not sensor_modes:
-            return None
-        selected_mode = self._select_sensor_mode(sensor_modes)
-        if not selected_mode:
-            return None
-        output_size = selected_mode.get("size") or selected_mode.get("output_size")
-        bit_depth = selected_mode.get("bit_depth")
-        if not output_size:
-            return None
-        sensor_config: dict[str, Any] = {"output_size": tuple(output_size)}
-        if bit_depth is not None:
-            sensor_config["bit_depth"] = int(bit_depth)
-        logger.info("Camera sensor mode selected for full FoV stream: %s", sensor_config)
-        return sensor_config
-
-    def _select_sensor_mode(self, sensor_modes: list[dict[str, Any]]) -> dict[str, Any] | None:
-        target_ratio = self._config.camera_width / max(self._config.camera_height, 1)
-        requested_fps = max(float(self._config.camera_fps), 1.0)
-        min_width = self._config.camera_width
-        min_height = self._config.camera_height
-        candidates: list[tuple[float, int, int, dict[str, Any]]] = []
-        fallback_candidates: list[tuple[float, int, int, dict[str, Any]]] = []
-
-        for mode in sensor_modes:
-            size = mode.get("size") or mode.get("output_size")
-            if not size or len(size) != 2:
-                continue
-            width, height = int(size[0]), int(size[1])
-            if width <= 0 or height <= 0:
-                continue
-            ratio_delta = abs((width / height) - target_ratio)
-            fps = self._mode_max_fps(mode)
-            record = (ratio_delta, -width * height, -int(round(fps * 100)), mode)
-            if width >= min_width and height >= min_height:
-                fallback_candidates.append(record)
-                if fps >= requested_fps:
-                    candidates.append(record)
-
-        if candidates:
-            return sorted(candidates, key=lambda item: (item[0], item[1], item[2]))[0][3]
-        if fallback_candidates:
-            return sorted(fallback_candidates, key=lambda item: (item[0], item[1], item[2]))[0][3]
-        return None
-
-    def _mode_max_fps(self, mode: dict[str, Any]) -> float:
-        for key in ("fps", "max_fps", "framerate"):
-            value = mode.get(key)
-            if value is not None:
-                try:
-                    return float(value)
-                except (TypeError, ValueError):
-                    pass
-        return 0.0
 
     def _capture_frame(self) -> np.ndarray | None:
         if self._picamera is not None:
