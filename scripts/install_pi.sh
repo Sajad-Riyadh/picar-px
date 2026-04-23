@@ -158,7 +158,7 @@ install_sunfounder_stack() {
   local tmp_dir
   tmp_dir="$(mktemp -d /tmp/picarx-unified-sunfounder-XXXXXX)"
 
-  venv_pip uninstall -y robot-hat robot_hat picarx >/dev/null 2>&1 || true
+  venv_pip uninstall -y robot-hat robot_hat picarx RPi.GPIO rpi-gpio rpi-lgpio >/dev/null 2>&1 || true
   venv_pip install pyaudio
 
   git clone --depth 1 -b v2.0 https://github.com/SunFounder/robot-hat.git "$tmp_dir/robot-hat"
@@ -172,6 +172,11 @@ install_sunfounder_stack() {
     cd "$tmp_dir/picar-x"
     venv_pip install .
   )
+
+  # Raspberry Pi 5 no longer supports the legacy RPi.GPIO backend. Replace it
+  # inside the venv with the Pi 5 compatible shim that exposes the same API.
+  venv_pip uninstall -y RPi.GPIO rpi-gpio >/dev/null 2>&1 || true
+  venv_pip install rpi-lgpio
   rm -rf "$tmp_dir"
 
   if ! venv_import_check 'from robot_hat import ADC, PWM, Servo, fileDB'; then
