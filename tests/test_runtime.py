@@ -4,11 +4,13 @@ import asyncio
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 from picarx_unified.config import AppConfig
-from picarx_unified.runtime import RobotRuntime
+from picarx_unified.runtime import RobotRuntime, _is_expected_websocket_disconnect
 from picarx_unified.state import StateStore
 from picarx_unified.models import CameraState, DriveRequest, DriveState, RobotSession, SettingsUpdateRequest
+from starlette.websockets import WebSocketDisconnect
 
 
 def make_config(state_dir: Path) -> AppConfig:
@@ -159,6 +161,31 @@ class RobotRuntimeTests(unittest.TestCase):
             self.assertEqual(session.drive.speed, 0)
             self.assertEqual(session.drive.steering, 0)
             self.assertEqual(hardware.drive_speed, 0)
+
+    def test_expected_browser_disconnect_is_not_logged_as_failure(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            runtime = RobotRuntime(make_config(Path(tmp_dir)))
+            websocket = object()
+            runtime._browser_clients.add(websocket)
+
+            class FakeFuture:
+                def result(self):
+                    raise WebSocketDisconnect(code=1006)
+
+            with patch("picarx_unified.runtime.logger") as logger_mock:
+                runtime._handle_browser_send_completion(websocket, FakeFuture())
+
+            self.assertNotIn(websocket, runtime._browser_clients)
+            logger_mock.exception.assert_not_called()
+            logger_mock.info.assert_called_once()
+
+
+class RuntimeHelperTests(unittest.TestCase):
+    def test_expected_websocket_disconnect_detects_nested_disconnect(self) -> None:
+        exc = RuntimeError("send failed")
+        exc.__cause__ = WebSocketDisconnect(code=1000)
+
+        self.assertTrue(_is_expected_websocket_disconnect(exc))
 
 
 if __name__ == "__main__":

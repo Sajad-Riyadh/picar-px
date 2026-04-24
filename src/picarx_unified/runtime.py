@@ -6,6 +6,8 @@ import logging
 import threading
 import time
 
+from starlette.websockets import WebSocketDisconnect
+
 from .ai import AIService
 from .audio import AudioRouter
 from .behaviors import RobotBehaviorController
@@ -32,6 +34,18 @@ from .state import StateStore
 from .vision import VisionService
 
 logger = logging.getLogger(__name__)
+
+
+def _is_expected_websocket_disconnect(exc: BaseException) -> bool:
+    current: BaseException | None = exc
+    while current is not None:
+        if isinstance(current, WebSocketDisconnect):
+            return True
+        class_name = type(current).__name__
+        if class_name in {"ClientDisconnected", "ConnectionClosedOK"}:
+            return True
+        current = current.__cause__ or current.__context__
+    return False
 
 
 class RobotRuntime:
@@ -485,7 +499,11 @@ class RobotRuntime:
     def _handle_browser_send_completion(self, websocket: object, future) -> None:
         try:
             future.result()
-        except Exception:
+        except Exception as exc:
+            if _is_expected_websocket_disconnect(exc):
+                logger.info("Browser websocket closed normally; dropping websocket client.")
+                self._drop_browser_client(websocket)
+                return
             logger.exception("Browser event delivery failed; dropping websocket client.")
             self._drop_browser_client(websocket)
 
