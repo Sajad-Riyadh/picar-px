@@ -37,7 +37,7 @@ Usage:
 
 What it does by default:
   1. Installs required Raspberry Pi OS packages
-  2. Installs the official SunFounder Robot HAT and PiCar-X Python stack if needed
+  2. Installs the official SunFounder PiCar-X Python stack if needed
   3. Creates/updates the local virtual environment
   4. Copies .env.example to .env on first run
   5. Launches the app
@@ -109,53 +109,16 @@ raise SystemExit(0 if importlib.util.find_spec(module) else 1)
 PY
 }
 
-venv_python() {
-  [[ -x "$VENV_DIR/bin/python" ]] || fail "Virtual environment is missing. Expected: $VENV_DIR"
-  "$VENV_DIR/bin/python" "$@"
-}
-
-venv_pip() {
-  [[ -x "$VENV_DIR/bin/python" ]] || fail "Virtual environment is missing. Expected: $VENV_DIR"
-  "$VENV_DIR/bin/python" -m pip "$@"
-}
-
-venv_import_check() {
-  local snippet="$1"
-  venv_python -c "$snippet" >/dev/null 2>&1
-}
-
-install_python_runtime_packages() {
-  log "Installing Python app dependencies into .venv without replacing Pi OS camera packages"
-  venv_pip uninstall -y \
-    numpy \
-    opencv-python \
-    opencv-python-headless \
-    opencv-contrib-python \
-    simplejpeg >/dev/null 2>&1 || true
-  venv_pip install \
-    "fastapi>=0.115.0" \
-    "uvicorn[standard]>=0.30.0" \
-    "filelock>=3.16.1" \
-    "pydantic>=2.9.0" \
-    "google-genai>=1.72.0"
-  venv_pip install --no-deps -e "$PROJECT_DIR"
-}
-
 install_system_packages() {
   log "Installing Raspberry Pi OS packages"
   run_root apt update
   run_root apt install -y \
-    build-essential \
     git \
     python3 \
-    python3-dev \
     python3-venv \
     python3-pip \
-    python3-setuptools \
-    python3-smbus \
     python3-opencv \
     python3-picamera2 \
-    portaudio19-dev \
     espeak-ng \
     alsa-utils
 }
@@ -165,62 +128,39 @@ install_sunfounder_stack() {
     return
   fi
 
-  if venv_import_check 'from robot_hat import ADC, PWM, Servo, fileDB' \
-    && venv_import_check 'from picarx import Picarx'; then
+  if python_has_module "picarx"; then
     log "Official SunFounder PiCar-X Python stack already installed"
     return
   fi
 
-  log "Installing official SunFounder Robot HAT and PiCar-X Python stack into .venv"
+  log "Installing official SunFounder PiCar-X Python stack"
   local tmp_dir
   tmp_dir="$(mktemp -d /tmp/picarx-unified-sunfounder-XXXXXX)"
 
-  venv_pip uninstall -y robot-hat robot_hat picarx RPi.GPIO rpi-gpio rpi-lgpio >/dev/null 2>&1 || true
-  venv_pip install pyaudio
-
-  git clone --depth 1 -b v2.0 https://github.com/SunFounder/robot-hat.git "$tmp_dir/robot-hat"
+  git clone --depth 1 -b v2.0 https://github.com/SunFounder/picar-x.git "$tmp_dir"
   (
-    cd "$tmp_dir/robot-hat"
-    venv_pip install .
+    cd "$tmp_dir"
+    run_root python3 setup.py install
   )
-
-  git clone --depth 1 -b v2.0 https://github.com/SunFounder/picar-x.git "$tmp_dir/picar-x"
-  (
-    cd "$tmp_dir/picar-x"
-    venv_pip install .
-  )
-
-  # Raspberry Pi 5 no longer supports the legacy RPi.GPIO backend. Replace it
-  # inside the venv with the Pi 5 compatible shim that exposes the same API.
-  venv_pip uninstall -y RPi.GPIO rpi-gpio >/dev/null 2>&1 || true
-  venv_pip install rpi-lgpio
   rm -rf "$tmp_dir"
 
-  if ! venv_import_check 'from robot_hat import ADC, PWM, Servo, fileDB'; then
-    fail "SunFounder installation finished but the venv still does not provide the expected robot_hat API."
-  fi
-
-  if ! venv_import_check 'from picarx import Picarx'; then
-    fail "SunFounder installation finished but the venv still cannot import picarx.Picarx."
+  if ! python_has_module "picarx"; then
+    fail "SunFounder PiCar-X stack installation finished but the 'picarx' module is still unavailable."
   fi
 }
 
 ensure_virtualenv() {
   if [[ ! -d "$VENV_DIR" ]]; then
-    log "Creating Python virtual environment with Raspberry Pi system packages"
-    python3 -m venv --system-site-packages "$VENV_DIR"
+    log "Creating Python virtual environment"
+    python3 -m venv "$VENV_DIR"
   fi
 
   # shellcheck disable=SC1091
   source "$VENV_DIR/bin/activate"
 
-  if python_has_module "picamera2" && ! venv_import_check 'from picamera2 import Picamera2'; then
-    fail "The existing .venv cannot see Raspberry Pi system camera packages. Remove $VENV_DIR and rerun this script so it can be recreated with --system-site-packages."
-  fi
-
-  log "Installing Python package tooling"
+  log "Installing Python package and dependencies"
   python -m pip install --upgrade pip setuptools wheel
-  install_python_runtime_packages
+  pip install -e "$PROJECT_DIR"
 }
 
 ensure_env_file() {
@@ -293,8 +233,8 @@ run_application() {
 main() {
   if (( INSTALL_DEPS )); then
     install_system_packages
-    ensure_virtualenv
     install_sunfounder_stack
+    ensure_virtualenv
     ensure_env_file
     prepare_runtime_env
   fi
