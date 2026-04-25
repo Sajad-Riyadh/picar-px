@@ -121,7 +121,7 @@ class CameraService:
         if not self._config.force_mock_camera and Picamera2 is not None:
             try:
                 self._picamera = Picamera2()
-                configuration = self._picamera.create_video_configuration(
+                configuration = self._picamera.create_still_configuration(
                     main={
                         "size": (self._config.camera_width, self._config.camera_height),
                         "format": "RGB888",
