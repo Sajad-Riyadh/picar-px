@@ -109,6 +109,10 @@ raise SystemExit(0 if importlib.util.find_spec(module) else 1)
 PY
 }
 
+venv_pip() {
+  "$VENV_DIR/bin/python" -m pip "$@"
+}
+
 install_system_packages() {
   log "Installing Raspberry Pi OS packages"
   run_root apt update
@@ -117,8 +121,12 @@ install_system_packages() {
     python3 \
     python3-venv \
     python3-pip \
+    libcamera-ipa \
+    libcamera0.3 \
+    python3-libcamera \
     python3-opencv \
     python3-picamera2 \
+    rpicam-apps-lite \
     espeak-ng \
     alsa-utils
 }
@@ -152,15 +160,27 @@ install_sunfounder_stack() {
 ensure_virtualenv() {
   if [[ ! -d "$VENV_DIR" ]]; then
     log "Creating Python virtual environment"
-    python3 -m venv "$VENV_DIR"
+    python3 -m venv --system-site-packages "$VENV_DIR"
   fi
 
   # shellcheck disable=SC1091
   source "$VENV_DIR/bin/activate"
 
-  log "Installing Python package and dependencies"
-  python -m pip install --upgrade pip setuptools wheel
-  pip install -e "$PROJECT_DIR"
+  log "Installing Python package without replacing Raspberry Pi camera packages"
+  venv_pip install --upgrade pip setuptools wheel
+  venv_pip install \
+    "fastapi>=0.115.0" \
+    "uvicorn[standard]>=0.30.0" \
+    "filelock>=3.16.1" \
+    "pydantic>=2.9.0" \
+    "google-genai>=1.72.0"
+  venv_pip install --no-deps -e "$PROJECT_DIR"
+  venv_pip uninstall -y \
+    numpy \
+    opencv-python \
+    opencv-python-headless \
+    opencv-contrib-python \
+    simplejpeg >/dev/null 2>&1 || true
 }
 
 ensure_env_file() {
