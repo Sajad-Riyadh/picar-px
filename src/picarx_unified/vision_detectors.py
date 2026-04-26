@@ -214,6 +214,9 @@ class CascadeDetector:
 
 class HogPersonDetector:
     def __init__(self, *, enabled: bool = True) -> None:
+        self._label = DetectionLabel.PERSON.value
+        self._enabled_flag = "person_detection_enabled"
+        self._source = "hog_person"
         self._hog = None
         if cv2 is None or not enabled:
             return
@@ -229,7 +232,7 @@ class HogPersonDetector:
         return self._hog is not None
 
     def detect(self, context: DetectorContext, settings: SettingsState) -> list[Detection]:
-        if not self.available or not is_detection_enabled(settings, "person_detection_enabled"):
+        if not self.available or not is_detection_enabled(settings, self._enabled_flag):
             return []
         scale = 0.75 if context.frame_width >= 480 else 1.0
         frame = context.frame
@@ -257,7 +260,7 @@ class HogPersonDetector:
                     width=width,
                     height=height,
                     confidence=max(0.45, confidence),
-                    source="hog_person",
+                    source=self._source,
                 )
             )
         return detections
@@ -265,6 +268,9 @@ class HogPersonDetector:
 
 class MotionObjectDetector:
     def __init__(self, min_area: int) -> None:
+        self._label = DetectionLabel.OBJECT.value
+        self._enabled_flag = "object_detection_enabled"
+        self._source = "motion_object"
         self._min_area = max(400, int(min_area))
         self._subtractor = None
         if cv2 is None:
@@ -283,7 +289,7 @@ class MotionObjectDetector:
         return self._subtractor is not None
 
     def detect(self, context: DetectorContext, settings: SettingsState) -> list[Detection]:
-        if not self.available or not is_detection_enabled(settings, "object_detection_enabled"):
+        if not self.available or not is_detection_enabled(settings, self._enabled_flag):
             return []
         mask = self._subtractor.apply(context.grayscale)
         kernel = np.ones((5, 5), dtype=np.uint8)
@@ -307,7 +313,7 @@ class MotionObjectDetector:
                     width=width,
                     height=height,
                     confidence=min(0.8, 0.35 + (area / max(frame_area, 1))),
-                    source="motion_object",
+                    source=self._source,
                 )
             )
         return detections

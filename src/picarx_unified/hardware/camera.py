@@ -47,6 +47,7 @@ class CameraService:
         self._first_frame_logged = False
         self._jpeg_encoder_path = "opencv-imencode"
         self._selected_sensor_mode: dict[str, Any] | None = None
+        self._active_scaler_crop: tuple[int, int, int, int] | None = None
 
     @property
     def backend_name(self) -> str:
@@ -292,6 +293,11 @@ class CameraService:
         if self._picamera is None:
             return
         controls_payload: dict[str, Any] = {"AwbEnable": bool(self._config.camera_awb_enable)}
+        if self._config.camera_full_fov:
+            full_crop = self._full_sensor_crop()
+            if full_crop is not None:
+                controls_payload["ScalerCrop"] = full_crop
+                self._active_scaler_crop = full_crop
         awb_mode = self._config.camera_awb_mode.strip().lower()
         if awb_mode and awb_mode != "auto":
             mode_value = self._resolve_awb_mode_value(awb_mode)
@@ -320,6 +326,21 @@ class CameraService:
         for candidate in candidates:
             if hasattr(awb_enum, candidate):
                 return getattr(awb_enum, candidate)
+        return None
+
+    def _full_sensor_crop(self) -> tuple[int, int, int, int] | None:
+        if self._picamera is None:
+            return None
+        try:
+            properties = getattr(self._picamera, "camera_properties", {}) or {}
+            crop = properties.get("ScalerCropMaximum")
+            if crop and len(crop) == 4:
+                return tuple(int(value) for value in crop)
+            pixel_array_size = properties.get("PixelArraySize")
+            if pixel_array_size and len(pixel_array_size) == 2:
+                return (0, 0, int(pixel_array_size[0]), int(pixel_array_size[1]))
+        except Exception:
+            logger.warning("Unable to resolve full sensor crop rectangle.", exc_info=True)
         return None
 
     def _select_sensor_mode(self, sensor_modes: list[dict[str, Any]]) -> dict[str, Any] | None:
@@ -363,6 +384,7 @@ class CameraService:
                 "fps": self._configured_fps,
                 "conversion": self._configured_conversion,
                 "jpeg_encoder": self._jpeg_encoder_path,
+                "scaler_crop": list(self._active_scaler_crop) if self._active_scaler_crop else None,
                 "frame_shape": frame_shape,
                 "frame_dtype": frame_dtype,
                 "frame_age_seconds": (time.time() - self._frame_at) if self._frame_at else None,
