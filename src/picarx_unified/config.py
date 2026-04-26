@@ -84,6 +84,11 @@ class AppConfig:
     camera_height: int
     camera_fps: int
     camera_index: int
+    camera_force_backend: str
+    camera_format: str
+    camera_color_fix: str
+    camera_awb_enable: bool
+    camera_awb_mode: str
     jpeg_quality: int
     voice_sample_rate: int
     voice_chunk_samples: int
@@ -124,6 +129,11 @@ class AppConfig:
             camera_height=_env_int("PICARX_CAMERA_HEIGHT", 480),
             camera_fps=_env_int("PICARX_CAMERA_FPS", 20),
             camera_index=_env_int("PICARX_CAMERA_INDEX", 0),
+            camera_force_backend=_env_text("PICARX_CAMERA_FORCE_BACKEND", "auto") or "auto",
+            camera_format=_env_text("PICARX_CAMERA_FORMAT", "RGB888") or "RGB888",
+            camera_color_fix=_env_text("PICARX_CAMERA_COLOR_FIX", "auto") or "auto",
+            camera_awb_enable=_env_flag("PICARX_CAMERA_AWB_ENABLE", True),
+            camera_awb_mode=_env_text("PICARX_CAMERA_AWB_MODE", "auto") or "auto",
             jpeg_quality=_env_int("PICARX_JPEG_QUALITY", 80),
             voice_sample_rate=_env_int("PICARX_VOICE_SAMPLE_RATE", 16000),
             voice_chunk_samples=_env_int("PICARX_VOICE_CHUNK_SAMPLES", 2048),

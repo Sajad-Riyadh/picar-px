@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -27,19 +28,24 @@ class CameraService:
     def __init__(self, config: AppConfig) -> None:
         self._config = config
         self._lock = threading.Lock()
+        self._frame_ready = threading.Condition(self._lock)
         self._frame: np.ndarray | None = None
+        self._frame_jpeg: bytes | None = None
         self._frame_at = 0.0
+        self._frame_sequence = 0
         self._running = False
         self._thread: threading.Thread | None = None
         self._backend_name = "none"
         self._camera: Any = None
         self._picamera: Any = None
         self._color_gains = np.array([1.0, 1.0, 1.0], dtype=np.float32)
-        self._configured_format = "unknown"
+        self._configured_format = str(self._config.camera_format).upper()
         self._configured_size = (self._config.camera_width, self._config.camera_height)
         self._configured_fps = float(self._config.camera_fps)
         self._configured_conversion = "none"
         self._first_frame_logged = False
+        self._jpeg_encoder_path = "opencv-imencode"
+        self._selected_sensor_mode: dict[str, Any] | None = None
 
     @property
     def backend_name(self) -> str:
@@ -69,6 +75,8 @@ class CameraService:
 
     def stop(self) -> None:
         self._running = False
+        with self._frame_ready:
+            self._frame_ready.notify_all()
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=1.0)
         self._thread = None
@@ -90,29 +98,22 @@ class CameraService:
             return None if self._frame is None else self._frame.copy()
 
     def get_frame_jpeg(self) -> bytes | None:
-        frame = self.get_frame()
-        if frame is None or cv2 is None:
-            return None
-        ok, encoded = cv2.imencode(
-            ".jpg",
-            frame,
-            [int(cv2.IMWRITE_JPEG_QUALITY), self._config.jpeg_quality],
-        )
-        if not ok:
-            return None
-        return encoded.tobytes()
+        with self._lock:
+            return self._frame_jpeg
 
     def stream_generator(self):
+        last_sequence = -1
         while True:
-            jpeg = self.get_frame_jpeg()
-            if jpeg:
-                yield (
-                    b"--frame\r\n"
-                    b"Content-Type: image/jpeg\r\n\r\n"
-                    + jpeg
-                    + b"\r\n"
+            with self._frame_ready:
+                timeout = max(1.0 / self._config.camera_fps, 0.2)
+                self._frame_ready.wait_for(
+                    lambda: self._frame_sequence != last_sequence or not self._running,
+                    timeout=timeout,
                 )
-            time.sleep(max(1.0 / self._config.camera_fps, 0.05))
+                jpeg = self._frame_jpeg
+                last_sequence = self._frame_sequence
+            if jpeg:
+                yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + jpeg + b"\r\n"
 
     def _capture_loop(self) -> None:
         self._initialise_backend()
@@ -121,75 +122,93 @@ class CameraService:
             frame = self._capture_frame()
             if frame is None:
                 frame = self._placeholder_frame()
+            jpeg = self._encode_frame_jpeg(frame)
             with self._lock:
                 self._frame = frame
+                self._frame_jpeg = jpeg
                 self._frame_at = time.time()
+                self._frame_sequence += 1
+                self._frame_ready.notify_all()
             time.sleep(interval)
 
     def _initialise_backend(self) -> None:
-        if not self._config.force_mock_camera and Picamera2 is not None:
+        force_backend = self._config.camera_force_backend.strip().lower()
+        allow_picamera2 = force_backend in {"auto", "picamera2"}
+        allow_opencv = force_backend in {"auto", "opencv"}
+        if force_backend == "mock":
+            self._backend_name = "mock"
+            self._log_camera_startup()
+            return
+
+        if not self._config.force_mock_camera and allow_picamera2 and Picamera2 is not None:
             try:
                 self._picamera = Picamera2()
-                self._picam_format = "BGR888"
-                try:
-                    configuration = self._picamera.create_video_configuration(
-                        main={
-                            "size": (self._config.camera_width, self._config.camera_height),
-                            "format": self._picam_format,
-                        },
-                        controls={"FrameRate": float(self._config.camera_fps)},
-                    )
-                except Exception:
-                    self._picam_format = "RGB888"
-                    configuration = self._picamera.create_video_configuration(
-                        main={
-                            "size": (self._config.camera_width, self._config.camera_height),
-                            "format": self._picam_format,
-                        },
-                        controls={"FrameRate": float(self._config.camera_fps)},
-                    )
-                self._picamera.configure(configuration)
-                self._picamera.start()
-                import logging
-                logging.getLogger(__name__).info(
-                    "picamera2 started: format=%s size=%dx%d fps=%d",
-                    self._picam_format,
-                    self._config.camera_width,
-                    self._config.camera_height,
-                    self._config.camera_fps,
+                requested_format = str(self._config.camera_format).upper()
+                candidate_formats = [requested_format, "BGR888", "RGB888"]
+                self._selected_sensor_mode = self._select_sensor_mode(
+                    getattr(self._picamera, "sensor_modes", []),
                 )
+                sensor = self._build_picamera_sensor_config()
+                last_error: Exception | None = None
+                configuration = None
+                self._configured_format = requested_format
+                for fmt in candidate_formats:
+                    self._configured_format = fmt
+                    try:
+                        config_kwargs: dict[str, Any] = {
+                            "main": {
+                                "size": (self._config.camera_width, self._config.camera_height),
+                                "format": fmt,
+                            },
+                            "controls": {"FrameRate": float(self._config.camera_fps)},
+                        }
+                        if sensor:
+                            config_kwargs["sensor"] = sensor
+                        configuration = self._picamera.create_video_configuration(**config_kwargs)
+                        break
+                    except Exception as exc:
+                        last_error = exc
+                if configuration is None:
+                    raise RuntimeError(f"Unable to configure Picamera2 video stream: {last_error}") from last_error
+                self._picamera.configure(configuration)
+                self._apply_picamera_controls()
+                self._picamera.start()
                 time.sleep(2.0)
                 self._backend_name = "picamera2"
+                self._configured_size = (self._config.camera_width, self._config.camera_height)
+                self._configured_fps = float(self._config.camera_fps)
+                self._log_camera_startup()
                 return
             except Exception:
+                logger.exception("Failed to initialise Picamera2 backend.")
                 self._picamera = None
-        if not self._config.force_mock_camera and cv2 is not None:
+        if not self._config.force_mock_camera and allow_opencv and cv2 is not None:
             self._camera = cv2.VideoCapture(self._config.camera_index)
             if self._camera is not None and self._camera.isOpened():
                 self._camera.set(cv2.CAP_PROP_FRAME_WIDTH, self._config.camera_width)
                 self._camera.set(cv2.CAP_PROP_FRAME_HEIGHT, self._config.camera_height)
                 self._backend_name = "opencv"
+                self._configured_format = "BGR"
+                self._configured_conversion = "none"
+                self._log_camera_startup()
                 return
         self._backend_name = "mock"
+        self._configured_conversion = "none"
+        self._log_camera_startup()
 
     def _capture_frame(self) -> np.ndarray | None:
         if self._picamera is not None:
             try:
                 frame = self._picamera.capture_array()
-                if not getattr(self, "_logged_first_frame", False):
-                    import logging
-                    logging.getLogger(__name__).info(
-                        "first frame: shape=%s dtype=%s format=%s",
-                        frame.shape, frame.dtype, self._picam_format,
+                frame = self._coerce_frame_to_bgr(frame)
+                if not self._first_frame_logged:
+                    logger.info(
+                        "Camera first frame shape=%s dtype=%s conversion=%s",
+                        getattr(frame, "shape", None),
+                        getattr(frame, "dtype", None),
+                        self._configured_conversion,
                     )
-                    self._logged_first_frame = True
-                n_ch = frame.shape[2] if frame.ndim == 3 else 0
-                if self._picam_format == "BGR888" and n_ch == 3:
-                    pass
-                elif self._picam_format == "RGB888" and n_ch == 3:
-                    frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-                elif n_ch == 4:
-                    frame = cv2.cvtColor(frame, cv2.COLOR_RGBA2BGR)
+                    self._first_frame_logged = True
                 return self._apply_color_gains(frame)
             except Exception:
                 return None
@@ -199,15 +218,49 @@ class CameraService:
                 return self._apply_color_gains(frame)
         return None
 
-    def _picamera_conversion_for_frame(self, frame: np.ndarray) -> tuple[int | None, str]:
-        if frame.ndim != 3:
-            return None, "none"
+    def _encode_frame_jpeg(self, frame: np.ndarray) -> bytes | None:
+        if cv2 is None:
+            return None
+        ok, encoded = cv2.imencode(
+            ".jpg",
+            frame,
+            [int(cv2.IMWRITE_JPEG_QUALITY), self._config.jpeg_quality],
+        )
+        if not ok:
+            return None
+        self._jpeg_encoder_path = "opencv-imencode"
+        return encoded.tobytes()
+
+    def _coerce_frame_to_bgr(self, frame: np.ndarray) -> np.ndarray:
+        if cv2 is None or frame.ndim != 3:
+            self._configured_conversion = "none"
+            return frame
         channels = frame.shape[2]
+        color_fix = self._config.camera_color_fix.strip().lower()
+        configured_format = str(self._configured_format).upper()
         if channels == 4:
-            return cv2.COLOR_RGBA2BGR if cv2 is not None else None, "RGBA2BGR"
-        if self._configured_format == "RGB888" and channels == 3:
-            return cv2.COLOR_RGB2BGR if cv2 is not None else None, "RGB2BGR"
-        return None, "none"
+            if "BGR" in configured_format:
+                self._configured_conversion = "BGRA2BGR"
+                return cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
+            self._configured_conversion = "RGBA2BGR"
+            return cv2.cvtColor(frame, cv2.COLOR_RGBA2BGR)
+        if channels != 3:
+            self._configured_conversion = "none"
+            return frame
+        if color_fix == "none":
+            self._configured_conversion = "none"
+            return frame
+        if color_fix == "rgb2bgr":
+            self._configured_conversion = "RGB2BGR"
+            return cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+        if color_fix == "bgr2rgb":
+            self._configured_conversion = "BGR2RGB"
+            return cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        if "RGB" in configured_format and "BGR" not in configured_format:
+            self._configured_conversion = "RGB2BGR"
+            return cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+        self._configured_conversion = "none"
+        return frame
 
     def _log_camera_startup(self) -> None:
         logger.info(
@@ -218,6 +271,107 @@ class CameraService:
             self._configured_fps,
             self._configured_conversion,
         )
+
+    def _apply_picamera_controls(self) -> None:
+        if self._picamera is None:
+            return
+        controls_payload: dict[str, Any] = {"AwbEnable": bool(self._config.camera_awb_enable)}
+        awb_mode = self._config.camera_awb_mode.strip().lower()
+        if awb_mode and awb_mode != "auto":
+            mode_value = self._resolve_awb_mode_value(awb_mode)
+            if mode_value is not None:
+                controls_payload["AwbMode"] = mode_value
+        try:
+            self._picamera.set_controls(controls_payload)
+        except Exception:
+            logger.warning("Unable to apply Picamera2 controls: %s", controls_payload, exc_info=True)
+
+    def _resolve_awb_mode_value(self, awb_mode: str) -> Any:
+        try:
+            from libcamera import controls as libcamera_controls  # type: ignore
+        except Exception:
+            return None
+        awb_enum = getattr(libcamera_controls, "AwbModeEnum", None)
+        if awb_enum is None:
+            return None
+        candidates = [
+            awb_mode,
+            awb_mode.title(),
+            awb_mode.capitalize(),
+            awb_mode.replace("_", ""),
+            awb_mode.replace("_", "").title(),
+        ]
+        for candidate in candidates:
+            if hasattr(awb_enum, candidate):
+                return getattr(awb_enum, candidate)
+        return None
+
+    def _select_sensor_mode(self, sensor_modes: list[dict[str, Any]]) -> dict[str, Any] | None:
+        if not sensor_modes:
+            return None
+        requested_w = int(self._config.camera_width)
+        requested_h = int(self._config.camera_height)
+        requested_fps = float(self._config.camera_fps)
+        viable = [
+            mode for mode in sensor_modes
+            if float(mode.get("fps", 0.0)) >= requested_fps
+        ]
+        candidates = viable or list(sensor_modes)
+        candidates.sort(
+            key=lambda mode: (
+                abs(int(mode["size"][0]) - requested_w) + abs(int(mode["size"][1]) - requested_h),
+                -(int(mode["size"][0]) * int(mode["size"][1])),
+            )
+        )
+        return candidates[0]
+
+    def _build_picamera_sensor_config(self) -> dict[str, Any] | None:
+        selected = self._selected_sensor_mode or self._select_sensor_mode(
+            getattr(self._picamera, "sensor_modes", []),
+        )
+        if not selected:
+            return None
+        payload: dict[str, Any] = {"output_size": tuple(selected["size"])}
+        if "bit_depth" in selected:
+            payload["bit_depth"] = int(selected["bit_depth"])
+        return payload
+
+    def diagnostics(self) -> dict[str, Any]:
+        with self._lock:
+            frame_shape = list(self._frame.shape) if self._frame is not None else None
+            frame_dtype = str(self._frame.dtype) if self._frame is not None else None
+            return {
+                "backend": self._backend_name,
+                "format": self._configured_format,
+                "size": list(self._configured_size),
+                "fps": self._configured_fps,
+                "conversion": self._configured_conversion,
+                "jpeg_encoder": self._jpeg_encoder_path,
+                "frame_shape": frame_shape,
+                "frame_dtype": frame_dtype,
+                "frame_age_seconds": (time.time() - self._frame_at) if self._frame_at else None,
+            }
+
+    def save_stream_debug_frames(self) -> dict[str, Any]:
+        frame = self.get_frame()
+        jpeg = self.get_frame_jpeg()
+        if frame is None:
+            return {"ok": False, "error": "No frame available."}
+        debug_dir = Path(self._config.state_dir) / "camera-debug"
+        debug_dir.mkdir(parents=True, exist_ok=True)
+        stamp = str(int(time.time() * 1000))
+        raw_path = debug_dir / f"stream-raw-{stamp}.npy"
+        np.save(raw_path, frame)
+        jpeg_path = None
+        if jpeg is not None:
+            jpeg_path = debug_dir / f"stream-jpeg-{stamp}.jpg"
+            jpeg_path.write_bytes(jpeg)
+        return {
+            "ok": True,
+            "raw_frame_path": str(raw_path),
+            "jpeg_frame_path": str(jpeg_path) if jpeg_path else None,
+            "diagnostics": self.diagnostics(),
+        }
 
     def _apply_color_gains(self, frame: np.ndarray) -> np.ndarray:
         if frame.ndim != 3 or frame.shape[2] != 3:

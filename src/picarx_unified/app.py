@@ -66,6 +66,11 @@ def create_app() -> FastAPI:
     async def health(request: Request):
         return _get_runtime(request).health()
 
+    @app.post("/api/camera/debug-frame")
+    async def camera_debug_frame(request: Request, _: None = Depends(_authorize)):
+        runtime = _get_runtime(request)
+        return runtime.camera.save_stream_debug_frames()
+
     @app.get("/api/state")
     async def state(request: Request):
         return _get_runtime(request).current_session()

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from enum import Enum
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -171,3 +172,4 @@ class HealthResponse(BaseModel):
     camera_backend: str
     ai_provider: str
     browser_clients: int
+    camera: dict[str, Any] | None = None

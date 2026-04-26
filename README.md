@@ -340,6 +340,44 @@ sudo systemctl status picarx-unified.service
 
 The service runs the same bootstrap script in `--run-only` mode, so the manual flow and boot flow stay aligned.
 
+## Camera color troubleshooting
+
+If browser live video colors look wrong (blue tint or swapped colors), but still photos and EzBlock look correct, the camera sensor is usually fine and the issue is frame format/channel conversion in the MJPEG pipeline.
+
+Quick checks:
+
+1. Confirm backend and active conversion path:
+   ```bash
+   curl http://127.0.0.1:8080/api/health
+   ```
+   Check `camera.backend`, `camera.format`, and `camera.conversion`.
+2. Force Picamera2 and a known format:
+   ```bash
+   nano .env
+   ```
+   Set:
+   ```text
+   PICARX_CAMERA_FORCE_BACKEND=picamera2
+   PICARX_CAMERA_FORMAT=RGB888
+   PICARX_CAMERA_COLOR_FIX=auto
+   PICARX_CAMERA_AWB_ENABLE=true
+   PICARX_CAMERA_AWB_MODE=auto
+   ```
+3. Verify camera stack outside this app:
+   ```bash
+   rpicam-hello -t 3000
+   ```
+4. Save one debug stream frame pair:
+   ```bash
+   curl -X POST http://127.0.0.1:8080/api/camera/debug-frame
+   ```
+   This writes one raw stream frame (`.npy`) and one encoded MJPEG JPEG (`.jpg`) under `state/camera-debug/`.
+5. Browser-side verify:
+   - Reload `http://<pi-ip>:8080/`
+   - Compare browser stream colors with new still capture and EzBlock stream.
+
+Common cause: OpenCV JPEG encoding expects BGR channel order, but an RGB frame was encoded without converting to BGR first.
+
 ## 7. Future improvements
 
 - Replace Haar face detection with a Pi-friendly detector such as MediaPipe or a lightweight YOLO model once you confirm performance on your Pi 5.

@@ -130,6 +130,7 @@ class RobotRuntime:
             camera_backend=self.camera.backend_name,
             ai_provider=self.ai.provider_name,
             browser_clients=self.browser_client_count,
+            camera=self.camera.diagnostics(),
         )
 
     def get_audio_state(self) -> tuple[VoiceMode, AudioTarget]:
