@@ -88,6 +88,29 @@ class VisionService:
         with self._lock:
             return self._snapshot.model_copy(deep=True)
 
+    def diagnostics(self) -> dict:
+        with self._lock:
+            settings = self._settings.model_copy(deep=True)
+            snapshot = self._snapshot.model_copy(deep=True)
+        return {
+            "running": self._running,
+            "frame_width": snapshot.frame_width,
+            "frame_height": snapshot.frame_height,
+            "detections": len(snapshot.detections),
+            "detected_labels": list(snapshot.detected_labels),
+            "summary": snapshot.summary,
+            "analyzed_at": snapshot.analyzed_at,
+            "settings": {
+                "detection_enabled": settings.detection_enabled,
+                "face_detection_enabled": settings.face_detection_enabled,
+                "person_detection_enabled": settings.person_detection_enabled,
+                "cat_detection_enabled": settings.cat_detection_enabled,
+                "object_detection_enabled": settings.object_detection_enabled,
+                "detection_overlay_enabled": settings.detection_overlay_enabled,
+            },
+            "detectors": self._detector_diagnostics(settings),
+        }
+
     def get_frame_jpeg(self) -> bytes | None:
         return self._camera.get_frame_jpeg()
 
@@ -144,6 +167,23 @@ class VisionService:
             frame_height=frame_height,
         )
 
+    def _detector_diagnostics(self, settings: SettingsState) -> list[dict]:
+        detectors = []
+        for detector in self._detectors:
+            enabled_flag = getattr(detector, "_enabled_flag", None)
+            detectors.append({
+                "name": type(detector).__name__,
+                "label": getattr(detector, "_label", None),
+                "source": getattr(detector, "_source", None),
+                "enabled_flag": enabled_flag,
+                "enabled": (
+                    settings.detection_enabled
+                    and (bool(getattr(settings, enabled_flag, True)) if enabled_flag else True)
+                ),
+                "available": bool(getattr(detector, "available", False)),
+            })
+        return detectors
+
     def _build_summary(
         self,
         detections: list[Detection],
@@ -151,7 +191,17 @@ class VisionService:
         frame_height: int,
     ) -> str:
         if not detections:
-            return "No configured face, person, cat, or object detections are active in the frame."
+            with self._lock:
+                settings = self._settings.model_copy(deep=True)
+            active_detectors = [
+                detector for detector in self._detector_diagnostics(settings)
+                if detector["enabled"] and detector["available"]
+            ]
+            if not settings.detection_enabled:
+                return "Detection is disabled from settings."
+            if not active_detectors:
+                return "Detection is enabled, but no OpenCV detectors are available on this system."
+            return "Detection is active, but no face, person, cat, or moving object is currently visible."
         counts = {
             label: sum(1 for detection in detections if detection.label == label)
             for label in {detection.label for detection in detections}
