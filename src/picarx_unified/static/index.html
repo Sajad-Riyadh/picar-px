@@ -8,7 +8,7 @@
   <title>PiCar-X Control</title>
   <link rel="stylesheet" href="/static/styles.css" />
 </head>
-<body data-estop="clear" data-mode="manual">
+<body data-estop="clear" data-mode="manual" data-video-size="medium">
   <div class="app-layout">
     <div id="estop-banner" class="estop-banner" hidden>
       <div class="estop-banner-inner">
@@ -134,17 +134,19 @@
             <button class="btn btn-xs btn-outline preset-chip" data-pan="45" data-tilt="0">Right &#9654;</button>
           </div>
         </div>
-        <div class="panel-group video-zoom-panel">
+        <div class="panel-group video-size-panel">
           <div class="panel-row">
-            <span class="section-title">Browser Video Zoom</span>
-            <button id="video-zoom-reset" type="button" class="btn btn-xs btn-outline">Reset</button>
+            <span class="section-title">Camera Display Size</span>
+            <button id="video-size-reset" type="button" class="btn btn-xs btn-outline">Reset</button>
           </div>
-          <div class="slider-row">
-            <span>Zoom</span>
-            <input id="video-zoom-slider" type="range" min="1" max="3" step="0.1" value="1" aria-label="Browser video zoom" />
-            <strong id="video-zoom-value">1.0x</strong>
+          <div class="size-preset-row" role="group" aria-label="Camera display size">
+            <button type="button" class="btn btn-xs btn-outline video-size-btn" data-video-size-option="small">Small</button>
+            <button type="button" class="btn btn-xs btn-outline video-size-btn" data-video-size-option="medium">Medium</button>
+            <button type="button" class="btn btn-xs btn-outline video-size-btn" data-video-size-option="large">Large</button>
+            <button type="button" class="btn btn-xs btn-outline video-size-btn" data-video-size-option="theater">Theater</button>
           </div>
-          <p class="hint-text">Display-only zoom. At 1.0x the full camera frame is shown; drag the video when zoomed in.</p>
+          <button id="video-fullscreen-btn" type="button" class="btn btn-xs btn-outline btn-full">Fullscreen</button>
+          <p class="hint-text">Changes only the browser display box. The full camera frame stays visible without zoom or crop.</p>
         </div>
         <div class="slider-row">
           <span>Pan</span>

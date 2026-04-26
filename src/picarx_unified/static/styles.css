@@ -29,6 +29,8 @@
   --drawer-width: 420px;
   --wing-width: 220px;
   --transition: 160ms ease;
+  --video-frame-width: 760px;
+  --video-frame-max-height: calc(100dvh - 160px);
 }
 
 *,
@@ -267,25 +269,22 @@ button {
   position: relative;
   display: flex;
   flex-direction: column;
+  align-items: center;
+  justify-content: center;
   min-height: 0;
+  padding: 16px;
 }
 
 .video-frame {
   position: relative;
-  flex: 1;
+  flex: 0 1 auto;
+  width: min(var(--video-frame-width), calc(var(--video-frame-max-height) * 4 / 3), 100%);
+  aspect-ratio: 4 / 3;
+  max-height: var(--video-frame-max-height);
   min-height: 0;
   background: #000;
   isolation: isolate;
   overflow: hidden;
-  touch-action: none;
-}
-
-.video-frame[data-zoomed="true"] {
-  cursor: grab;
-}
-
-.video-frame[data-dragging="true"] {
-  cursor: grabbing;
 }
 
 .video-content {
@@ -293,13 +292,6 @@ button {
   inset: 0;
   z-index: 0;
   overflow: hidden;
-  transform-origin: center center;
-  transition: transform 140ms ease;
-  will-change: transform;
-}
-
-.video-frame[data-dragging="true"] .video-content {
-  transition: none;
 }
 
 #video-stream {
@@ -311,6 +303,32 @@ button {
   background: #000;
   pointer-events: none;
   user-select: none;
+}
+
+[data-video-size="small"] {
+  --video-frame-width: 480px;
+}
+
+[data-video-size="medium"] {
+  --video-frame-width: 760px;
+}
+
+[data-video-size="large"] {
+  --video-frame-width: 1080px;
+}
+
+[data-video-size="theater"] {
+  --video-frame-width: calc(100vw - 32px);
+  --video-frame-max-height: calc(100dvh - 112px);
+}
+
+.video-frame:fullscreen {
+  width: 100vw;
+  height: 100vh;
+  max-height: none;
+  aspect-ratio: auto;
+  border-radius: 0;
+  background: #000;
 }
 
 .vision-overlay {
@@ -416,6 +434,7 @@ button {
 
 .vision-bar {
   flex-shrink: 0;
+  width: min(var(--video-frame-width), 100%);
   padding: 10px 16px;
   border-top: 1px solid var(--border);
   background: rgba(7, 14, 22, 0.92);
@@ -766,8 +785,20 @@ input[type="range"]::-moz-range-thumb {
   padding: 14px;
 }
 
-.video-zoom-panel {
+.video-size-panel {
   gap: 12px;
+}
+
+.size-preset-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.video-size-btn[data-active="true"] {
+  color: #041016;
+  border-color: transparent;
+  background: linear-gradient(135deg, var(--accent), var(--accent-strong));
 }
 
 .toggle-row {
