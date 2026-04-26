@@ -423,15 +423,16 @@ Common causes:
 - Browser CSS using `object-fit: cover`, fixed aspect ratios, `overflow: hidden`, or `transform: scale(...)` can crop the displayed image. This app uses `object-fit: contain` for `#video-stream` so the full MJPEG frame remains visible.
 - OpenCV `resize()` keeps the same field of view, but array slicing such as `frame[y:y+h, x:x+w]` would crop. The camera stream path does not slice the captured frame.
 
-## Browser camera display size
+## Camera display frame controls
 
-The browser dashboard includes camera display-size presets in the Camera panel. This changes only the UI display box; it does not zoom, crop, resize the MJPEG stream, change camera resolution, or alter Picamera2/libcamera settings.
+The browser dashboard includes camera display controls in the Camera panel. This changes only the UI display box; it does not zoom, crop, resize the MJPEG stream, change camera resolution, or alter Picamera2/libcamera settings.
 
-- `Small`, `Medium`, `Large`, and `Theater` are browser layout options for the live camera display area.
+- `Small`, `Medium`, `Large`, and `Theater` change only the camera display frame size in the page layout.
+- `Camera 4:3`, `Wide 16:9`, `Square 1:1`, and `Auto Fit` change only the display frame shape.
 - The live image uses `object-fit: contain`, so the full camera frame remains visible with black bars when the display box aspect ratio differs.
 - `Fullscreen` uses the browser Fullscreen API on the camera display frame when supported.
-- `Reset` returns the display size to `Medium`.
-- The selected size is saved locally in the browser as `PICARX_VIDEO_DISPLAY_SIZE`; it is not saved to backend robot settings.
+- `Reset Display` returns the frame to `Medium` size and `Camera 4:3` shape.
+- The selected size and shape are saved locally in the browser as `PICARX_VIDEO_DISPLAY_SIZE` and `PICARX_VIDEO_DISPLAY_SHAPE`; they are not saved to backend robot settings.
 
 ## 7. Future improvements
 

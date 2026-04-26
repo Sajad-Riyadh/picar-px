@@ -31,6 +31,8 @@
   --transition: 160ms ease;
   --video-frame-width: 760px;
   --video-frame-max-height: calc(100dvh - 160px);
+  --video-frame-aspect-width: 4;
+  --video-frame-aspect-height: 3;
 }
 
 *,
@@ -278,8 +280,8 @@ button {
 .video-frame {
   position: relative;
   flex: 0 1 auto;
-  width: min(var(--video-frame-width), calc(var(--video-frame-max-height) * 4 / 3), 100%);
-  aspect-ratio: 4 / 3;
+  width: min(var(--video-frame-width), calc(var(--video-frame-max-height) * (var(--video-frame-aspect-width) / var(--video-frame-aspect-height))), 100%);
+  aspect-ratio: var(--video-frame-aspect-width) / var(--video-frame-aspect-height);
   max-height: var(--video-frame-max-height);
   min-height: 0;
   background: #000;
@@ -321,6 +323,28 @@ button {
 [data-video-size="theater"] {
   --video-frame-width: calc(100vw - 32px);
   --video-frame-max-height: calc(100dvh - 112px);
+}
+
+[data-video-shape="camera"] {
+  --video-frame-aspect-width: 4;
+  --video-frame-aspect-height: 3;
+}
+
+[data-video-shape="wide"] {
+  --video-frame-aspect-width: 16;
+  --video-frame-aspect-height: 9;
+}
+
+[data-video-shape="square"] {
+  --video-frame-aspect-width: 1;
+  --video-frame-aspect-height: 1;
+}
+
+[data-video-shape="auto"] .video-frame {
+  width: min(var(--video-frame-width), 100%);
+  height: min(var(--video-frame-max-height), calc(100dvh - 172px));
+  max-width: 100%;
+  aspect-ratio: auto;
 }
 
 .video-frame:fullscreen {
@@ -806,6 +830,12 @@ input[type="range"]::-moz-range-thumb {
 }
 
 .video-size-btn[data-active="true"] {
+  color: #041016;
+  border-color: transparent;
+  background: linear-gradient(135deg, var(--accent), var(--accent-strong));
+}
+
+.video-shape-btn[data-active="true"] {
   color: #041016;
   border-color: transparent;
   background: linear-gradient(135deg, var(--accent), var(--accent-strong));

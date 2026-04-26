@@ -9,7 +9,9 @@ const CONFIG = {
   reconnectMaxMs: 10000,
   reconnectJitterMs: 250,
   videoDisplaySizeStorageKey: "PICARX_VIDEO_DISPLAY_SIZE",
+  videoDisplayShapeStorageKey: "PICARX_VIDEO_DISPLAY_SHAPE",
   videoDisplaySizes: ["small", "medium", "large", "theater"],
+  videoDisplayShapes: ["camera", "wide", "square", "auto"],
 };
 
 const ENDPOINTS = {
@@ -102,6 +104,7 @@ function videoElementDiagnostics(videoStream, videoFrame) {
     frameHeight: Math.round(frameRect.height || 0),
     objectFit: getComputedStyle(videoStream).objectFit,
     selectedSize: document.body.dataset.videoSize || "medium",
+    selectedShape: document.body.dataset.videoShape || "camera",
   };
 }
 
@@ -158,7 +161,8 @@ class DomRegistry {
     this.cameraFollowToggle = $("#camera-follow-toggle");
     this.presetChips = $$(".preset-chip");
     this.videoSizeButtons = $$(".video-size-btn");
-    this.videoSizeReset = $("#video-size-reset");
+    this.videoShapeButtons = $$(".video-shape-btn");
+    this.videoDisplayReset = $("#video-display-reset");
     this.videoFullscreenBtn = $("#video-fullscreen-btn");
 
     this.voiceModeSelect = $("#voice-mode-select");
@@ -1042,6 +1046,7 @@ class PiCarDashboard {
       visionQueued: false,
       lastVideoDiagnostics: null,
       videoDisplaySize: "medium",
+      videoDisplayShape: "camera",
       volume: 80,
       voiceSocketConnected: false,
     };
@@ -1181,16 +1186,47 @@ class PiCarDashboard {
     console.debug("PiCar-X video display size", diagnostics);
   }
 
-  resetVideoDisplaySize() {
-    this.setVideoDisplaySize("medium");
+  setVideoDisplayShape(shape, { save = true } = {}) {
+    const nextShape = CONFIG.videoDisplayShapes.includes(shape) ? shape : "camera";
+    this.state.videoDisplayShape = nextShape;
+    this.applyVideoDisplayShape({ save });
   }
 
-  restoreVideoDisplaySize() {
+  applyVideoDisplayShape({ save = true } = {}) {
+    const shape = CONFIG.videoDisplayShapes.includes(this.state.videoDisplayShape)
+      ? this.state.videoDisplayShape
+      : "camera";
+    this.state.videoDisplayShape = shape;
+    document.body.dataset.videoShape = shape;
+    this.dom.videoShapeButtons.forEach(button => {
+      const active = button.dataset.videoShapeOption === shape;
+      button.dataset.active = active ? "true" : "false";
+      button.setAttribute("aria-pressed", active ? "true" : "false");
+    });
+    if (save) {
+      try {
+        localStorage.setItem(CONFIG.videoDisplayShapeStorageKey, shape);
+      } catch (_) {}
+    }
+    queueMicrotask(() => this.renderer.renderVisionOverlay(this.state.session?.vision, this.state.session?.settings));
+    const diagnostics = videoElementDiagnostics(this.dom.videoStream, this.dom.videoFrame);
+    console.debug("PiCar-X video display shape", diagnostics);
+  }
+
+  resetVideoDisplay() {
+    this.setVideoDisplaySize("medium");
+    this.setVideoDisplayShape("camera");
+  }
+
+  restoreVideoDisplaySettings() {
     let storedSize = "medium";
+    let storedShape = "camera";
     try {
       storedSize = localStorage.getItem(CONFIG.videoDisplaySizeStorageKey) || "medium";
+      storedShape = localStorage.getItem(CONFIG.videoDisplayShapeStorageKey) || "camera";
     } catch (_) {}
     this.setVideoDisplaySize(storedSize, { save: false });
+    this.setVideoDisplayShape(storedShape, { save: false });
   }
 
   isVideoFullscreenActive() {
@@ -1531,7 +1567,10 @@ class PiCarDashboard {
     this.dom.videoSizeButtons.forEach(button => {
       button.addEventListener("click", () => this.setVideoDisplaySize(button.dataset.videoSizeOption));
     });
-    this.dom.videoSizeReset.addEventListener("click", () => this.resetVideoDisplaySize());
+    this.dom.videoShapeButtons.forEach(button => {
+      button.addEventListener("click", () => this.setVideoDisplayShape(button.dataset.videoShapeOption));
+    });
+    this.dom.videoDisplayReset.addEventListener("click", () => this.resetVideoDisplay());
     this.dom.videoFullscreenBtn.addEventListener("click", () => this.enterVideoFullscreen());
     const onFullscreenChange = () => {
       this.updateVideoFullscreenButtonState();
@@ -1669,7 +1708,7 @@ class PiCarDashboard {
 
   async init() {
     this.showPanel("camera");
-    this.restoreVideoDisplaySize();
+    this.restoreVideoDisplaySettings();
     this.updateVideoFullscreenButtonState();
     this.renderer.syncRangeReadouts();
     this.updateMessageCount();

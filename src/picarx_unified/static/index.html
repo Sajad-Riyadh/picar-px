@@ -8,7 +8,7 @@
   <title>PiCar-X Control</title>
   <link rel="stylesheet" href="/static/styles.css" />
 </head>
-<body data-estop="clear" data-mode="manual" data-video-size="medium">
+<body data-estop="clear" data-mode="manual" data-video-size="medium" data-video-shape="camera">
   <div class="app-layout">
     <div id="estop-banner" class="estop-banner" hidden>
       <div class="estop-banner-inner">
@@ -137,13 +137,22 @@
         <div class="panel-group video-size-panel">
           <div class="panel-row">
             <span class="section-title">Camera Display Size</span>
-            <button id="video-size-reset" type="button" class="btn btn-xs btn-outline">Reset</button>
+            <button id="video-display-reset" type="button" class="btn btn-xs btn-outline">Reset Display</button>
           </div>
           <div class="size-preset-row" role="group" aria-label="Camera display size">
             <button type="button" class="btn btn-xs btn-outline video-size-btn" data-video-size-option="small">Small</button>
             <button type="button" class="btn btn-xs btn-outline video-size-btn" data-video-size-option="medium">Medium</button>
             <button type="button" class="btn btn-xs btn-outline video-size-btn" data-video-size-option="large">Large</button>
             <button type="button" class="btn btn-xs btn-outline video-size-btn" data-video-size-option="theater">Theater</button>
+          </div>
+          <div class="panel-row">
+            <span class="section-title">Camera Display Shape</span>
+          </div>
+          <div class="size-preset-row" role="group" aria-label="Camera display shape">
+            <button type="button" class="btn btn-xs btn-outline video-shape-btn" data-video-shape-option="camera">Camera 4:3</button>
+            <button type="button" class="btn btn-xs btn-outline video-shape-btn" data-video-shape-option="wide">Wide 16:9</button>
+            <button type="button" class="btn btn-xs btn-outline video-shape-btn" data-video-shape-option="square">Square 1:1</button>
+            <button type="button" class="btn btn-xs btn-outline video-shape-btn" data-video-shape-option="auto">Auto Fit</button>
           </div>
           <button id="video-fullscreen-btn" type="button" class="btn btn-xs btn-outline btn-full" aria-pressed="false">Fullscreen</button>
           <p class="hint-text">Changes only the browser display box. The full camera frame stays visible without zoom or crop.</p>
