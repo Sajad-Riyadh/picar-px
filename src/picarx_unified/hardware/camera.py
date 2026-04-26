@@ -130,29 +130,37 @@ class CameraService:
         if not self._config.force_mock_camera and Picamera2 is not None:
             try:
                 self._picamera = Picamera2()
-                size = (self._config.camera_width, self._config.camera_height)
-                fps = float(self._config.camera_fps)
-                for pixel_format in ("BGR888", "RGB888"):
-                    try:
-                        configuration = self._picamera.create_video_configuration(
-                            main={"size": size, "format": pixel_format},
-                            controls={"FrameRate": fps},
-                        )
-                        self._picamera.configure(configuration)
-                        self._picamera.start()
-                        time.sleep(2.0)
-                        self._backend_name = "picamera2"
-                        self._configured_format = pixel_format
-                        self._configured_size = size
-                        self._configured_fps = fps
-                        self._configured_conversion = (
-                            "RGB2BGR" if pixel_format == "RGB888" else "none"
-                        )
-                        self._log_camera_startup()
-                        return
-                    except Exception:
-                        if pixel_format == "RGB888":
-                            raise
+                self._picam_format = "BGR888"
+                try:
+                    configuration = self._picamera.create_video_configuration(
+                        main={
+                            "size": (self._config.camera_width, self._config.camera_height),
+                            "format": self._picam_format,
+                        },
+                        controls={"FrameRate": float(self._config.camera_fps)},
+                    )
+                except Exception:
+                    self._picam_format = "RGB888"
+                    configuration = self._picamera.create_video_configuration(
+                        main={
+                            "size": (self._config.camera_width, self._config.camera_height),
+                            "format": self._picam_format,
+                        },
+                        controls={"FrameRate": float(self._config.camera_fps)},
+                    )
+                self._picamera.configure(configuration)
+                self._picamera.start()
+                import logging
+                logging.getLogger(__name__).info(
+                    "picamera2 started: format=%s size=%dx%d fps=%d",
+                    self._picam_format,
+                    self._config.camera_width,
+                    self._config.camera_height,
+                    self._config.camera_fps,
+                )
+                time.sleep(2.0)
+                self._backend_name = "picamera2"
+                return
             except Exception:
                 self._picamera = None
         if not self._config.force_mock_camera and cv2 is not None:
@@ -161,37 +169,27 @@ class CameraService:
                 self._camera.set(cv2.CAP_PROP_FRAME_WIDTH, self._config.camera_width)
                 self._camera.set(cv2.CAP_PROP_FRAME_HEIGHT, self._config.camera_height)
                 self._backend_name = "opencv"
-                self._configured_format = "BGR888"
-                self._configured_size = (
-                    self._config.camera_width,
-                    self._config.camera_height,
-                )
-                self._configured_fps = float(self._config.camera_fps)
-                self._configured_conversion = "none"
-                self._log_camera_startup()
                 return
         self._backend_name = "mock"
-        self._configured_format = "BGR888"
-        self._configured_size = (self._config.camera_width, self._config.camera_height)
-        self._configured_fps = float(self._config.camera_fps)
-        self._configured_conversion = "none"
-        self._log_camera_startup()
 
     def _capture_frame(self) -> np.ndarray | None:
         if self._picamera is not None:
             try:
                 frame = self._picamera.capture_array()
-                conversion_code, conversion_used = self._picamera_conversion_for_frame(frame)
-                if not self._first_frame_logged:
-                    logger.info(
-                        "Camera first frame shape=%s dtype=%s conversion=%s",
-                        frame.shape,
-                        frame.dtype,
-                        conversion_used,
+                if not getattr(self, "_logged_first_frame", False):
+                    import logging
+                    logging.getLogger(__name__).info(
+                        "first frame: shape=%s dtype=%s format=%s",
+                        frame.shape, frame.dtype, self._picam_format,
                     )
-                    self._first_frame_logged = True
-                if cv2 is not None and conversion_code is not None:
-                    frame = cv2.cvtColor(frame, conversion_code)
+                    self._logged_first_frame = True
+                n_ch = frame.shape[2] if frame.ndim == 3 else 0
+                if self._picam_format == "BGR888" and n_ch == 3:
+                    pass
+                elif self._picam_format == "RGB888" and n_ch == 3:
+                    frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                elif n_ch == 4:
+                    frame = cv2.cvtColor(frame, cv2.COLOR_RGBA2BGR)
                 return self._apply_color_gains(frame)
             except Exception:
                 return None
