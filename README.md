@@ -378,6 +378,51 @@ Quick checks:
 
 Common cause: OpenCV JPEG encoding expects BGR channel order, but an RGB frame was encoded without converting to BGR first.
 
+## Camera video looks zoomed/cropped
+
+If the browser live view looks about 2x zoomed compared with `rpicam-hello` or another normal camera preview, check the capture path before changing motor, safety, AI, or UI controls. The live stream path is:
+
+```text
+Picamera2 main stream -> capture_array("main") -> color conversion/gains -> JPEG encode -> /stream.mjpg -> browser <img id="video-stream">
+```
+
+Quick checks:
+
+1. Confirm the active camera backend and crop metadata:
+   ```bash
+   curl http://127.0.0.1:8080/api/health
+   ```
+   Inspect `camera.requested_size`, `camera.size`, `camera.frame_shape`, `camera.picamera_configuration`, `camera.picamera_metadata.ScalerCrop`, `camera.picamera_properties`, and `camera.sensor_modes`.
+2. Use full-FOV defaults in `.env`:
+   ```text
+   PICARX_CAMERA_WIDTH=640
+   PICARX_CAMERA_HEIGHT=480
+   PICARX_CAMERA_FULL_FOV=true
+   PICARX_CAMERA_DISABLE_SCALER_CROP=true
+   ```
+   With full FOV enabled, the app does not force a 640x480 sensor mode. Picamera2 can use its normal video sensor mode and scale the main stream down to the requested MJPEG size.
+3. Save one captured-frame/JPEG pair:
+   ```bash
+   curl -X POST http://127.0.0.1:8080/api/camera/debug-frame
+   ```
+   Compare `captured-frame-*.jpg` with `stream-jpeg-*.jpg` under `state/camera-debug/`. If both are zoomed, the crop happened in Picamera2/libcamera before JPEG encoding. If the files look normal but the browser looks cropped, inspect browser layout/CSS.
+4. Compare against Raspberry Pi's camera preview:
+   ```bash
+   rpicam-hello -t 3000
+   ```
+   If `rpicam-hello` shows a wider view than `/stream.mjpg`, check `ScalerCrop`, selected sensor mode, and requested stream size in `/api/health`.
+5. Browser-side verify:
+   - Open `http://<pi-ip>:8080/`
+   - Open browser DevTools console.
+   - Look for `PiCar-X video diagnostics`, which logs `naturalWidth`, `naturalHeight`, `clientWidth`, `clientHeight`, frame size, `objectFit`, and the server camera diagnostics.
+
+Common causes:
+
+- Forcing a low-resolution Picamera2 sensor `output_size` such as 640x480 can select a cropped sensor mode. Keep `PICARX_CAMERA_FULL_FOV=true`.
+- A `ScalerCrop` control smaller than the sensor maximum creates digital zoom. Keep `PICARX_CAMERA_DISABLE_SCALER_CROP=true` unless you intentionally want crop control.
+- Browser CSS using `object-fit: cover`, fixed aspect ratios, `overflow: hidden`, or `transform: scale(...)` can crop the displayed image. This app uses `object-fit: contain` for `#video-stream` so the full MJPEG frame remains visible.
+- OpenCV `resize()` keeps the same field of view, but array slicing such as `frame[y:y+h, x:x+w]` would crop. The camera stream path does not slice the captured frame.
+
 ## 7. Future improvements
 
 - Replace Haar face detection with a Pi-friendly detector such as MediaPipe or a lightweight YOLO model once you confirm performance on your Pi 5.

@@ -48,6 +48,10 @@ class CameraService:
         self._jpeg_encoder_path = "opencv-imencode"
         self._selected_sensor_mode: dict[str, Any] | None = None
         self._active_scaler_crop: tuple[int, int, int, int] | None = None
+        self._picamera_configuration: dict[str, Any] | None = None
+        self._picamera_properties: dict[str, Any] | None = None
+        self._picamera_metadata: dict[str, Any] | None = None
+        self._last_metadata_at = 0.0
 
     @property
     def backend_name(self) -> str:
@@ -147,8 +151,11 @@ class CameraService:
                 self._picamera = Picamera2()
                 requested_format = str(self._config.camera_format).upper()
                 candidate_formats = [requested_format, "BGR888", "RGB888"]
-                self._selected_sensor_mode = self._select_sensor_mode(
-                    getattr(self._picamera, "sensor_modes", []),
+                sensor_modes = getattr(self._picamera, "sensor_modes", [])
+                self._selected_sensor_mode = (
+                    None
+                    if self._config.camera_full_fov
+                    else self._select_sensor_mode(sensor_modes)
                 )
                 sensor = self._build_picamera_sensor_config()
                 last_error: Exception | None = None
@@ -173,11 +180,12 @@ class CameraService:
                 if configuration is None:
                     raise RuntimeError(f"Unable to configure Picamera2 video stream: {last_error}") from last_error
                 self._picamera.configure(configuration)
+                self._record_picamera_configuration()
                 self._apply_picamera_controls()
                 self._picamera.start()
                 time.sleep(2.0)
                 self._backend_name = "picamera2"
-                self._configured_size = (self._config.camera_width, self._config.camera_height)
+                self._update_picamera_metadata(force=True)
                 self._configured_fps = float(self._config.camera_fps)
                 self._log_camera_startup()
                 return
@@ -201,7 +209,8 @@ class CameraService:
     def _capture_frame(self) -> np.ndarray | None:
         if self._picamera is not None:
             try:
-                frame = self._picamera.capture_array()
+                frame = self._picamera.capture_array("main")
+                self._update_picamera_metadata()
                 frame = self._coerce_frame_to_bgr(frame)
                 if not self._first_frame_logged:
                     logger.info(
@@ -293,7 +302,7 @@ class CameraService:
         if self._picamera is None:
             return
         controls_payload: dict[str, Any] = {"AwbEnable": bool(self._config.camera_awb_enable)}
-        if self._config.camera_full_fov:
+        if self._config.camera_full_fov and not self._config.camera_disable_scaler_crop:
             full_crop = self._full_sensor_crop()
             if full_crop is not None:
                 controls_payload["ScalerCrop"] = full_crop
@@ -363,6 +372,8 @@ class CameraService:
         return candidates[0]
 
     def _build_picamera_sensor_config(self) -> dict[str, Any] | None:
+        if self._config.camera_full_fov:
+            return None
         selected = self._selected_sensor_mode or self._select_sensor_mode(
             getattr(self._picamera, "sensor_modes", []),
         )
@@ -372,6 +383,78 @@ class CameraService:
         if "bit_depth" in selected:
             payload["bit_depth"] = int(selected["bit_depth"])
         return payload
+
+    def _record_picamera_configuration(self) -> None:
+        if self._picamera is None:
+            return
+        try:
+            camera_config_ref = getattr(self._picamera, "camera_configuration", None)
+            camera_config = camera_config_ref() if callable(camera_config_ref) else camera_config_ref
+        except Exception:
+            camera_config = None
+        self._picamera_configuration = self._json_safe(camera_config)
+        try:
+            self._picamera_properties = self._json_safe(
+                getattr(self._picamera, "camera_properties", {}) or {}
+            )
+        except Exception:
+            self._picamera_properties = None
+        main_config = (
+            self._picamera_configuration.get("main")
+            if isinstance(self._picamera_configuration, dict)
+            else None
+        )
+        size = main_config.get("size") if isinstance(main_config, dict) else None
+        if isinstance(size, (list, tuple)) and len(size) >= 2:
+            self._configured_size = (int(size[0]), int(size[1]))
+
+    def _update_picamera_metadata(self, *, force: bool = False) -> None:
+        if self._picamera is None:
+            return
+        now = time.time()
+        if not force and (now - self._last_metadata_at) < 1.0:
+            return
+        try:
+            metadata = self._picamera.capture_metadata()
+        except Exception:
+            return
+        self._last_metadata_at = now
+        self._picamera_metadata = self._json_safe(metadata)
+        scaler_crop = self._picamera_metadata.get("ScalerCrop") if self._picamera_metadata else None
+        if isinstance(scaler_crop, (list, tuple)) and len(scaler_crop) == 4:
+            self._active_scaler_crop = tuple(int(value) for value in scaler_crop)
+
+    def _sensor_mode_diagnostics(self) -> dict[str, Any]:
+        modes = getattr(self._picamera, "sensor_modes", []) if self._picamera is not None else []
+        mode_summaries = []
+        for mode in modes[:8]:
+            summary = {
+                "size": self._json_safe(mode.get("size")),
+                "fps": self._json_safe(mode.get("fps")),
+                "bit_depth": self._json_safe(mode.get("bit_depth")),
+                "crop_limits": self._json_safe(mode.get("crop_limits")),
+            }
+            mode_summaries.append({key: value for key, value in summary.items() if value is not None})
+        return {
+            "selected": self._json_safe(self._selected_sensor_mode),
+            "available_count": len(modes),
+            "available_preview": mode_summaries,
+            "forced_sensor_mode": self._selected_sensor_mode is not None,
+        }
+
+    def _json_safe(self, value: Any) -> Any:
+        if value is None or isinstance(value, (str, int, float, bool)):
+            return value
+        if isinstance(value, dict):
+            return {str(key): self._json_safe(item) for key, item in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [self._json_safe(item) for item in value]
+        if hasattr(value, "__iter__") and not isinstance(value, (bytes, bytearray)):
+            try:
+                return [self._json_safe(item) for item in value]
+            except TypeError:
+                pass
+        return str(value)
 
     def diagnostics(self) -> dict[str, Any]:
         with self._lock:
@@ -384,6 +467,13 @@ class CameraService:
                 "fps": self._configured_fps,
                 "conversion": self._configured_conversion,
                 "jpeg_encoder": self._jpeg_encoder_path,
+                "requested_size": [self._config.camera_width, self._config.camera_height],
+                "full_fov": self._config.camera_full_fov,
+                "disable_scaler_crop": self._config.camera_disable_scaler_crop,
+                "picamera_configuration": self._picamera_configuration,
+                "picamera_properties": self._picamera_properties,
+                "picamera_metadata": self._picamera_metadata,
+                "sensor_modes": self._sensor_mode_diagnostics(),
                 "scaler_crop": list(self._active_scaler_crop) if self._active_scaler_crop else None,
                 "frame_shape": frame_shape,
                 "frame_dtype": frame_dtype,
@@ -400,6 +490,16 @@ class CameraService:
         stamp = str(int(time.time() * 1000))
         raw_path = debug_dir / f"stream-raw-{stamp}.npy"
         np.save(raw_path, frame)
+        raw_jpeg_path = None
+        if cv2 is not None:
+            ok, encoded = cv2.imencode(
+                ".jpg",
+                frame,
+                [int(cv2.IMWRITE_JPEG_QUALITY), self._config.jpeg_quality],
+            )
+            if ok:
+                raw_jpeg_path = debug_dir / f"captured-frame-{stamp}.jpg"
+                raw_jpeg_path.write_bytes(encoded.tobytes())
         jpeg_path = None
         if jpeg is not None:
             jpeg_path = debug_dir / f"stream-jpeg-{stamp}.jpg"
@@ -407,6 +507,7 @@ class CameraService:
         return {
             "ok": True,
             "raw_frame_path": str(raw_path),
+            "captured_frame_jpeg_path": str(raw_jpeg_path) if raw_jpeg_path else None,
             "jpeg_frame_path": str(jpeg_path) if jpeg_path else None,
             "diagnostics": self.diagnostics(),
         }

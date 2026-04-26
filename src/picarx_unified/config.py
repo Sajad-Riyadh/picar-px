@@ -89,6 +89,7 @@ class AppConfig:
     camera_color_fix: str
     camera_jpeg_encoder: str
     camera_full_fov: bool
+    camera_disable_scaler_crop: bool
     camera_awb_enable: bool
     camera_awb_mode: str
     jpeg_quality: int
@@ -136,6 +137,7 @@ class AppConfig:
             camera_color_fix=_env_text("PICARX_CAMERA_COLOR_FIX", "auto") or "auto",
             camera_jpeg_encoder=_env_text("PICARX_CAMERA_JPEG_ENCODER", "auto") or "auto",
             camera_full_fov=_env_flag("PICARX_CAMERA_FULL_FOV", True),
+            camera_disable_scaler_crop=_env_flag("PICARX_CAMERA_DISABLE_SCALER_CROP", True),
             camera_awb_enable=_env_flag("PICARX_CAMERA_AWB_ENABLE", True),
             camera_awb_mode=_env_text("PICARX_CAMERA_AWB_MODE", "auto") or "auto",
             jpeg_quality=_env_int("PICARX_JPEG_QUALITY", 80),

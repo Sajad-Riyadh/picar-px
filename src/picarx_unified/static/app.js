@@ -88,6 +88,20 @@ function formatDetectedClasses(vision) {
     .join(", ");
 }
 
+function videoElementDiagnostics(videoStream, videoFrame) {
+  if (!videoStream || !videoFrame) return null;
+  const frameRect = videoFrame.getBoundingClientRect();
+  return {
+    naturalWidth: videoStream.naturalWidth || 0,
+    naturalHeight: videoStream.naturalHeight || 0,
+    clientWidth: Math.round(videoStream.clientWidth || 0),
+    clientHeight: Math.round(videoStream.clientHeight || 0),
+    frameWidth: Math.round(frameRect.width || 0),
+    frameHeight: Math.round(frameRect.height || 0),
+    objectFit: getComputedStyle(videoStream).objectFit,
+  };
+}
+
 class DomRegistry {
   constructor() {
     this.cache();
@@ -414,6 +428,15 @@ class SessionRenderer {
     if (this.dom.hwChip) {
       this.dom.hwChip.textContent = `HW: ${titleCase(health.hardware_backend)}`;
       this.dom.hwChip.dataset.tone = health.hardware_backend === "mockpicarx" ? "warn" : "ok";
+    }
+    const videoDiagnostics = videoElementDiagnostics(this.dom.videoStream, this.dom.videoFrame);
+    const videoSignature = JSON.stringify(videoDiagnostics);
+    if (videoSignature !== this.state.lastVideoDiagnostics) {
+      this.state.lastVideoDiagnostics = videoSignature;
+      console.debug("PiCar-X video diagnostics", {
+        browser: videoDiagnostics,
+        camera: health.camera,
+      });
     }
     if (this.dom.connDot) this.dom.connDot.dataset.ok = "true";
     if (this.dom.connLabel) this.dom.connLabel.textContent = "Online";
@@ -1010,6 +1033,7 @@ class PiCarDashboard {
       refreshQueued: false,
       visionPromise: null,
       visionQueued: false,
+      lastVideoDiagnostics: null,
       volume: 80,
       voiceSocketConnected: false,
     };

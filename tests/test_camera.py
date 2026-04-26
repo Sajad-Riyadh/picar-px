@@ -27,6 +27,7 @@ def make_config(state_dir: Path) -> AppConfig:
         camera_color_fix="auto",
         camera_jpeg_encoder="auto",
         camera_full_fov=True,
+        camera_disable_scaler_crop=True,
         camera_awb_enable=True,
         camera_awb_mode="auto",
         jpeg_quality=80,
@@ -88,6 +89,7 @@ class CameraServiceTests(unittest.TestCase):
             camera = CameraService(make_config(Path(tmp_dir)))
             camera._config.camera_width = 1296
             camera._config.camera_height = 972
+            camera._config.camera_full_fov = False
             camera._config.camera_fps = 20
             sensor_modes = [
                 {"size": (640, 480), "bit_depth": 10, "fps": 58.92},
@@ -106,6 +108,7 @@ class CameraServiceTests(unittest.TestCase):
             camera = CameraService(make_config(Path(tmp_dir)))
             camera._config.camera_width = 1296
             camera._config.camera_height = 972
+            camera._config.camera_full_fov = False
 
             class FakePicamera:
                 sensor_modes = [
