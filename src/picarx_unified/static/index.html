@@ -42,8 +42,10 @@
     <main class="cockpit">
       <section class="video-section">
         <div id="video-frame" class="video-frame">
-          <img id="video-stream" src="/stream.mjpg" alt="Live camera feed" />
-          <div id="vision-overlay" class="vision-overlay" aria-hidden="true"></div>
+          <div id="video-content" class="video-content">
+            <img id="video-stream" src="/stream.mjpg" alt="Live camera feed" draggable="false" />
+            <div id="vision-overlay" class="vision-overlay" aria-hidden="true"></div>
+          </div>
           <div class="video-hud">
             <div class="hud-top-row">
               <span class="hud-pill live">&#9679; LIVE</span>
@@ -131,6 +133,18 @@
             <button class="btn btn-xs btn-outline preset-chip" data-pan="0" data-tilt="0">Home</button>
             <button class="btn btn-xs btn-outline preset-chip" data-pan="45" data-tilt="0">Right &#9654;</button>
           </div>
+        </div>
+        <div class="panel-group video-zoom-panel">
+          <div class="panel-row">
+            <span class="section-title">Browser Video Zoom</span>
+            <button id="video-zoom-reset" type="button" class="btn btn-xs btn-outline">Reset</button>
+          </div>
+          <div class="slider-row">
+            <span>Zoom</span>
+            <input id="video-zoom-slider" type="range" min="1" max="3" step="0.1" value="1" aria-label="Browser video zoom" />
+            <strong id="video-zoom-value">1.0x</strong>
+          </div>
+          <p class="hint-text">Display-only zoom. At 1.0x the full camera frame is shown; drag the video when zoomed in.</p>
         </div>
         <div class="slider-row">
           <span>Pan</span>

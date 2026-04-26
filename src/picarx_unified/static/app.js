@@ -8,6 +8,7 @@ const CONFIG = {
   reconnectBaseMs: 500,
   reconnectMaxMs: 10000,
   reconnectJitterMs: 250,
+  videoZoomStorageKey: "PICARX_VIDEO_ZOOM",
 };
 
 const ENDPOINTS = {
@@ -88,7 +89,7 @@ function formatDetectedClasses(vision) {
     .join(", ");
 }
 
-function videoElementDiagnostics(videoStream, videoFrame) {
+function videoElementDiagnostics(videoStream, videoFrame, videoContent = null) {
   if (!videoStream || !videoFrame) return null;
   const frameRect = videoFrame.getBoundingClientRect();
   return {
@@ -99,6 +100,7 @@ function videoElementDiagnostics(videoStream, videoFrame) {
     frameWidth: Math.round(frameRect.width || 0),
     frameHeight: Math.round(frameRect.height || 0),
     objectFit: getComputedStyle(videoStream).objectFit,
+    contentTransform: videoContent ? getComputedStyle(videoContent).transform : null,
   };
 }
 
@@ -126,6 +128,7 @@ class DomRegistry {
     this.estopResetBtn = $("#estop-reset-btn");
 
     this.videoFrame = $("#video-frame");
+    this.videoContent = $("#video-content");
     this.videoStream = $("#video-stream");
     this.visionOverlay = $("#vision-overlay");
     this.hudDrive = $("#hud-drive");
@@ -153,6 +156,9 @@ class DomRegistry {
     this.tiltValue = $("#tilt-value");
     this.cameraFollowToggle = $("#camera-follow-toggle");
     this.presetChips = $$(".preset-chip");
+    this.videoZoomSlider = $("#video-zoom-slider");
+    this.videoZoomValue = $("#video-zoom-value");
+    this.videoZoomReset = $("#video-zoom-reset");
 
     this.voiceModeSelect = $("#voice-mode-select");
     this.audioTargetSelect = $("#audio-target-select");
@@ -270,6 +276,7 @@ class SessionRenderer {
     if (this.dom.autonomousTurnValue) this.dom.autonomousTurnValue.textContent = `${this.dom.autonomousTurnInput.value} deg`;
     if (this.dom.autonomousStopDistanceValue) this.dom.autonomousStopDistanceValue.textContent = `${this.dom.autonomousStopDistanceInput.value} cm`;
     if (this.dom.volumeValue) this.dom.volumeValue.textContent = `${this.dom.volumeSlider.value}%`;
+    if (this.dom.videoZoomValue) this.dom.videoZoomValue.textContent = `${Number(this.state.videoZoom || 1).toFixed(1)}x`;
   }
 
   syncSettingsForm(settings, force = false) {
@@ -429,7 +436,7 @@ class SessionRenderer {
       this.dom.hwChip.textContent = `HW: ${titleCase(health.hardware_backend)}`;
       this.dom.hwChip.dataset.tone = health.hardware_backend === "mockpicarx" ? "warn" : "ok";
     }
-    const videoDiagnostics = videoElementDiagnostics(this.dom.videoStream, this.dom.videoFrame);
+    const videoDiagnostics = videoElementDiagnostics(this.dom.videoStream, this.dom.videoFrame, this.dom.videoContent);
     const videoSignature = JSON.stringify(videoDiagnostics);
     if (videoSignature !== this.state.lastVideoDiagnostics) {
       this.state.lastVideoDiagnostics = videoSignature;
@@ -1034,6 +1041,10 @@ class PiCarDashboard {
       visionPromise: null,
       visionQueued: false,
       lastVideoDiagnostics: null,
+      videoZoom: 1,
+      videoPanX: 0,
+      videoPanY: 0,
+      videoDrag: null,
       volume: 80,
       voiceSocketConnected: false,
     };
@@ -1144,6 +1155,109 @@ class PiCarDashboard {
       this.dom.micChip.textContent = this.state.captureActive ? "Mic: Live" : "Mic: Off";
       this.dom.micChip.dataset.tone = this.state.captureActive ? "active" : "neutral";
     }
+  }
+
+  videoRenderSize() {
+    const frameRect = this.dom.videoFrame?.getBoundingClientRect();
+    if (!frameRect?.width || !frameRect?.height) {
+      return { frameWidth: 0, frameHeight: 0, renderWidth: 0, renderHeight: 0 };
+    }
+    const naturalWidth = this.dom.videoStream?.naturalWidth || this.state.session?.vision?.frame_width || 4;
+    const naturalHeight = this.dom.videoStream?.naturalHeight || this.state.session?.vision?.frame_height || 3;
+    const scale = Math.min(frameRect.width / naturalWidth, frameRect.height / naturalHeight);
+    return {
+      frameWidth: frameRect.width,
+      frameHeight: frameRect.height,
+      renderWidth: naturalWidth * scale,
+      renderHeight: naturalHeight * scale,
+    };
+  }
+
+  updateZoomLabel() {
+    if (this.dom.videoZoomValue) {
+      this.dom.videoZoomValue.textContent = `${Number(this.state.videoZoom || 1).toFixed(1)}x`;
+    }
+  }
+
+  clampVideoPan(panX = this.state.videoPanX, panY = this.state.videoPanY) {
+    const zoom = Number(this.state.videoZoom || 1);
+    if (zoom <= 1.0001) return { x: 0, y: 0 };
+    const { frameWidth, frameHeight, renderWidth, renderHeight } = this.videoRenderSize();
+    const maxX = Math.max(0, ((renderWidth * zoom) - frameWidth) / 2);
+    const maxY = Math.max(0, ((renderHeight * zoom) - frameHeight) / 2);
+    return {
+      x: clamp(panX, -maxX, maxX),
+      y: clamp(panY, -maxY, maxY),
+    };
+  }
+
+  applyVideoZoom({ save = true } = {}) {
+    if (!this.dom.videoContent || !this.dom.videoFrame) return;
+    this.state.videoZoom = clamp(Number(this.state.videoZoom || 1), 1, 3);
+    const pan = this.clampVideoPan();
+    this.state.videoPanX = pan.x;
+    this.state.videoPanY = pan.y;
+    this.dom.videoContent.style.transform = `translate3d(${pan.x}px, ${pan.y}px, 0) scale(${this.state.videoZoom})`;
+    this.dom.videoFrame.dataset.zoomed = this.state.videoZoom > 1.0001 ? "true" : "false";
+    this.updateZoomLabel();
+    if (this.dom.videoZoomSlider) {
+      this.dom.videoZoomSlider.value = String(this.state.videoZoom);
+    }
+    if (save) {
+      try {
+        localStorage.setItem(CONFIG.videoZoomStorageKey, String(this.state.videoZoom));
+      } catch (_) {}
+    }
+  }
+
+  resetVideoZoom() {
+    this.state.videoZoom = 1;
+    this.state.videoPanX = 0;
+    this.state.videoPanY = 0;
+    this.applyVideoZoom();
+  }
+
+  restoreVideoZoom() {
+    let storedZoom = 1;
+    try {
+      storedZoom = Number(localStorage.getItem(CONFIG.videoZoomStorageKey) || 1);
+    } catch (_) {}
+    this.state.videoZoom = clamp(Number.isFinite(storedZoom) ? storedZoom : 1, 1, 3);
+    this.state.videoPanX = 0;
+    this.state.videoPanY = 0;
+    this.applyVideoZoom({ save: false });
+  }
+
+  startVideoPan(event) {
+    if (this.state.videoZoom <= 1.0001 || (event.pointerType === "mouse" && event.button !== 0)) return;
+    this.state.videoDrag = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      panX: this.state.videoPanX,
+      panY: this.state.videoPanY,
+    };
+    this.dom.videoFrame.dataset.dragging = "true";
+    try {
+      this.dom.videoFrame.setPointerCapture(event.pointerId);
+    } catch (_) {}
+    event.preventDefault();
+  }
+
+  moveVideoPan(event) {
+    const drag = this.state.videoDrag;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    this.state.videoPanX = drag.panX + event.clientX - drag.startX;
+    this.state.videoPanY = drag.panY + event.clientY - drag.startY;
+    this.applyVideoZoom({ save: false });
+    event.preventDefault();
+  }
+
+  endVideoPan(event) {
+    const drag = this.state.videoDrag;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    this.state.videoDrag = null;
+    this.dom.videoFrame.dataset.dragging = "false";
   }
 
   logMessage(role, text) {
@@ -1442,7 +1556,28 @@ class PiCarDashboard {
     window.addEventListener("keydown", event => {
       if (event.key === "Escape") this.closeDrawer();
     });
-    window.addEventListener("resize", () => this.renderer.renderVisionOverlay(this.state.session?.vision, this.state.session?.settings));
+    window.addEventListener("resize", () => {
+      this.applyVideoZoom({ save: false });
+      this.renderer.renderVisionOverlay(this.state.session?.vision, this.state.session?.settings);
+    });
+    this.dom.videoStream.addEventListener("load", () => {
+      this.applyVideoZoom({ save: false });
+      this.renderer.renderVisionOverlay(this.state.session?.vision, this.state.session?.settings);
+    });
+    this.dom.videoZoomSlider.addEventListener("input", () => {
+      this.state.videoZoom = Number(this.dom.videoZoomSlider.value);
+      if (this.state.videoZoom <= 1.0001) {
+        this.state.videoPanX = 0;
+        this.state.videoPanY = 0;
+      }
+      this.applyVideoZoom();
+    });
+    this.dom.videoZoomReset.addEventListener("click", () => this.resetVideoZoom());
+    this.dom.videoFrame.addEventListener("pointerdown", event => this.startVideoPan(event));
+    this.dom.videoFrame.addEventListener("pointermove", event => this.moveVideoPan(event));
+    this.dom.videoFrame.addEventListener("pointerup", event => this.endVideoPan(event));
+    this.dom.videoFrame.addEventListener("pointercancel", event => this.endVideoPan(event));
+    this.dom.videoFrame.addEventListener("lostpointercapture", event => this.endVideoPan(event));
 
     this.dom.quickMicBtn.addEventListener("click", () => this.toggleOpenMic());
 
@@ -1573,6 +1708,7 @@ class PiCarDashboard {
 
   async init() {
     this.showPanel("camera");
+    this.restoreVideoZoom();
     this.renderer.syncRangeReadouts();
     this.updateMessageCount();
     this.bindUi();

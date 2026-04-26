@@ -274,16 +274,43 @@ button {
   position: relative;
   flex: 1;
   min-height: 0;
-  background:
-    radial-gradient(circle at center, rgba(13, 38, 56, 0.25), transparent 55%),
-    #000;
+  background: #000;
+  isolation: isolate;
   overflow: hidden;
+  touch-action: none;
+}
+
+.video-frame[data-zoomed="true"] {
+  cursor: grab;
+}
+
+.video-frame[data-dragging="true"] {
+  cursor: grabbing;
+}
+
+.video-content {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  transform-origin: center center;
+  transition: transform 140ms ease;
+  will-change: transform;
+}
+
+.video-frame[data-dragging="true"] .video-content {
+  transition: none;
 }
 
 #video-stream {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   object-fit: contain;
+  background: #000;
+  pointer-events: none;
+  user-select: none;
 }
 
 .vision-overlay {
@@ -340,6 +367,7 @@ button {
 .video-hud {
   position: absolute;
   inset: 0;
+  z-index: 2;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
@@ -429,6 +457,7 @@ button {
 
 .wing-head,
 .wing-footer,
+.panel-row,
 .drawer-header,
 .mic-header,
 .log-head {
@@ -735,6 +764,10 @@ input[type="range"]::-moz-range-thumb {
 .greeting-box,
 .safety-note {
   padding: 14px;
+}
+
+.video-zoom-panel {
+  gap: 12px;
 }
 
 .toggle-row {

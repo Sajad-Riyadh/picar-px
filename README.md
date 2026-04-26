@@ -423,6 +423,16 @@ Common causes:
 - Browser CSS using `object-fit: cover`, fixed aspect ratios, `overflow: hidden`, or `transform: scale(...)` can crop the displayed image. This app uses `object-fit: contain` for `#video-stream` so the full MJPEG frame remains visible.
 - OpenCV `resize()` keeps the same field of view, but array slicing such as `frame[y:y+h, x:x+w]` would crop. The camera stream path does not slice the captured frame.
 
+## Browser video zoom
+
+The browser dashboard includes a display-only zoom slider in the Camera panel. This does not change Picamera2, libcamera, OpenCV, JPEG encoding, or `/stream.mjpg`; it only scales the live image and detection overlay together in the browser.
+
+- Default `1.0x` shows the full camera frame with black letterboxing if the browser frame has a different aspect ratio.
+- Moving the slider above `1.0x` intentionally crops the display so you can inspect details.
+- When zoomed in, drag the live view with a mouse or touch to inspect the frame edges and corners.
+- Click `Reset` to return to `1.0x` and recenter the view.
+- The zoom value is saved locally in the browser as `PICARX_VIDEO_ZOOM`; it is not saved to backend robot settings.
+
 ## 7. Future improvements
 
 - Replace Haar face detection with a Pi-friendly detector such as MediaPipe or a lightweight YOLO model once you confirm performance on your Pi 5.
