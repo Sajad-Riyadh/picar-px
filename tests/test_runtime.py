@@ -27,6 +27,7 @@ def make_config(state_dir: Path) -> AppConfig:
         camera_force_backend="auto",
         camera_format="RGB888",
         camera_color_fix="auto",
+        camera_jpeg_encoder="auto",
         camera_awb_enable=True,
         camera_awb_mode="auto",
         jpeg_quality=80,

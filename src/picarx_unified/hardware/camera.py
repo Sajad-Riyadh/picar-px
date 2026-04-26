@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from io import BytesIO
 from pathlib import Path
 from typing import Any
 
@@ -219,6 +220,21 @@ class CameraService:
         return None
 
     def _encode_frame_jpeg(self, frame: np.ndarray) -> bytes | None:
+        encoder_mode = self._config.camera_jpeg_encoder.strip().lower()
+        prefer_picamera2 = (
+            self._picamera is not None
+            and encoder_mode in {"auto", "picamera2", "libcamera"}
+        )
+        if prefer_picamera2:
+            try:
+                buffer = BytesIO()
+                self._picamera.capture_file(buffer, format="jpeg")
+                data = buffer.getvalue()
+                if data:
+                    self._jpeg_encoder_path = "picamera2-capture_file"
+                    return data
+            except Exception:
+                logger.warning("Picamera2 native JPEG encode failed, falling back to OpenCV.", exc_info=True)
         if cv2 is None:
             return None
         ok, encoded = cv2.imencode(
