@@ -1193,17 +1193,37 @@ class PiCarDashboard {
     this.setVideoDisplaySize(storedSize, { save: false });
   }
 
+  isVideoFullscreenActive() {
+    const activeElement = document.fullscreenElement || document.webkitFullscreenElement;
+    return activeElement === this.dom.videoFrame;
+  }
+
+  updateVideoFullscreenButtonState() {
+    if (!this.dom.videoFullscreenBtn) return;
+    const fullscreenActive = this.isVideoFullscreenActive();
+    this.dom.videoFullscreenBtn.textContent = fullscreenActive ? "Exit Fullscreen" : "Fullscreen";
+    this.dom.videoFullscreenBtn.setAttribute("aria-pressed", fullscreenActive ? "true" : "false");
+  }
+
   enterVideoFullscreen() {
     const target = this.dom.videoFrame;
-    if (!target?.requestFullscreen) {
+    if (!target) {
+      this.setSpeechStatus("Video frame is not available for fullscreen.", "warn");
+      return;
+    }
+    const requestFullscreen = target.requestFullscreen?.bind(target)
+      || target.webkitRequestFullscreen?.bind(target);
+    if (!requestFullscreen) {
       this.setSpeechStatus("Fullscreen is not supported by this browser.", "warn");
       return;
     }
-    if (document.fullscreenElement) {
-      document.exitFullscreen?.().catch(() => null);
+    if (this.isVideoFullscreenActive()) {
+      const exitFullscreen = document.exitFullscreen?.bind(document)
+        || document.webkitExitFullscreen?.bind(document);
+      Promise.resolve(exitFullscreen?.()).catch(() => null);
       return;
     }
-    target.requestFullscreen().catch(error => this.setSpeechStatus(error.message, "danger"));
+    Promise.resolve(requestFullscreen()).catch(error => this.setSpeechStatus(error.message, "danger"));
   }
 
   logMessage(role, text) {
@@ -1513,9 +1533,12 @@ class PiCarDashboard {
     });
     this.dom.videoSizeReset.addEventListener("click", () => this.resetVideoDisplaySize());
     this.dom.videoFullscreenBtn.addEventListener("click", () => this.enterVideoFullscreen());
-    document.addEventListener("fullscreenchange", () => {
+    const onFullscreenChange = () => {
+      this.updateVideoFullscreenButtonState();
       this.renderer.renderVisionOverlay(this.state.session?.vision, this.state.session?.settings);
-    });
+    };
+    document.addEventListener("fullscreenchange", onFullscreenChange);
+    document.addEventListener("webkitfullscreenchange", onFullscreenChange);
 
     this.dom.quickMicBtn.addEventListener("click", () => this.toggleOpenMic());
 
@@ -1647,6 +1670,7 @@ class PiCarDashboard {
   async init() {
     this.showPanel("camera");
     this.restoreVideoDisplaySize();
+    this.updateVideoFullscreenButtonState();
     this.renderer.syncRangeReadouts();
     this.updateMessageCount();
     this.bindUi();
