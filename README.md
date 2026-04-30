@@ -201,6 +201,28 @@ bash scripts/install_pi.sh --run-only --host 0.0.0.0 --port 8080
 
 The script auto-loads `.env` if it exists, so optional settings such as `GEMINI_API_KEY` and `PICARX_API_TOKEN` can live there.
 
+### Hardware initialization mode
+
+The motor/servo backend is controlled by `.env`:
+
+```text
+PICARX_USE_MOCK=true
+PICARX_HARDWARE_INIT_MODE=auto
+```
+
+`PICARX_USE_MOCK=true` is safe dashboard mode. The camera, API, AI, and browser UI can run, but drive commands do not move the car.
+
+When real hardware is ready, set:
+
+```text
+PICARX_USE_MOCK=false
+PICARX_HARDWARE_INIT_MODE=direct
+```
+
+`direct` initializes SunFounder `Picarx()` in the service process at startup. Use this when the same command works manually but background probe mode stays on `MockPicarx`.
+
+`auto` starts with `MockPicarx` and probes in the background. This is safer for boot timing, but on some cars it may not match the manual hardware environment.
+
 ### Full install on Raspberry Pi 5
 
 ```bash

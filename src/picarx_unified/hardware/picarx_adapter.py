@@ -54,8 +54,9 @@ class PicarxAdapter:
         self._hardware = self._init_hardware()
         self._backend_name = type(self._hardware).__name__
         self._snapshot = HardwareSnapshot()
-        # If real hardware was requested but unavailable, retry in background
-        if not self._config.use_mock_hardware and self.is_mock:
+        init_mode = self._config.hardware_init_mode.strip().lower()
+        # If auto hardware was requested but unavailable, retry in background.
+        if not self._config.use_mock_hardware and init_mode == "auto" and self.is_mock:
             threading.Thread(
                 target=self._retry_hardware_in_background, daemon=True
             ).start()
@@ -71,11 +72,23 @@ class PicarxAdapter:
     def _init_hardware(self) -> Any:
         if self._config.use_mock_hardware:
             return MockPicarx()
-        # Never attempt real hardware in-process on startup — a failed Picarx()
-        # leaks GPIO handles via gpiozero, blocking all future attempts.
-        # Background subprocess probe will swap in real hardware once ready.
+        init_mode = self._config.hardware_init_mode.strip().lower()
+        if init_mode == "direct":
+            try:
+                from picarx import Picarx
+
+                logger.info("Initializing real Picarx hardware directly")
+                return Picarx()
+            except Exception:
+                logger.exception("Direct Picarx hardware initialization failed")
+                return MockPicarx()
+        if init_mode == "mock":
+            return MockPicarx()
+        # Auto mode starts safely, then probes in a subprocess. Direct mode is
+        # available for cars where manual Picarx() init works but subprocess
+        # probing does not match the hardware environment.
         logger.info(
-            "Starting with MockPicarx — background probe will swap in real "
+            "Starting with MockPicarx; background probe will swap in real "
             "hardware once I2C/GPIO are ready"
         )
         return MockPicarx()

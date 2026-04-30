@@ -124,6 +124,7 @@ class AppConfig:
     autonomous_max_speed: int
     autonomous_manual_override_seconds: float
     use_mock_hardware: bool
+    hardware_init_mode: str
     force_mock_camera: bool
     api_token: str | None
     gemini_api_key: str | None
@@ -188,6 +189,7 @@ class AppConfig:
                 2.5,
             ),
             use_mock_hardware=_env_flag("PICARX_USE_MOCK", False),
+            hardware_init_mode=_env_text("PICARX_HARDWARE_INIT_MODE", "auto") or "auto",
             force_mock_camera=_env_flag("PICARX_FORCE_MOCK_CAMERA", False),
             api_token=_env_text("PICARX_API_TOKEN"),
             gemini_api_key=_env_text("GEMINI_API_KEY"),
