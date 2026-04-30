@@ -12,7 +12,10 @@ from .models import AudioTargetRequest, CameraRequest, DriveRequest, ModeRequest
 from .runtime import RobotRuntime
 from .safety import SafetyViolation
 from .voice import VoiceConnection
-
+from .models import (
+    # ... your existing models ...
+    WifiJammerRequest,          # ← ADD THIS LINE
+)
 
 def _authorize(request: Request, authorization: Annotated[str | None, Header()] = None) -> None:
     token = request.app.state.runtime.config.api_token
@@ -170,5 +173,34 @@ def create_app() -> FastAPI:
                 return
         connection = VoiceConnection(websocket.app.state.runtime, websocket)
         await connection.run()
+
+            # ====================== WiFi Deauth Jammer Endpoints ======================
+    @app.get("/api/jammer/scan")
+    async def scan_networks(request: Request):
+        """Scan nearby WiFi networks (safe - protects your SSH)"""
+        runtime = _get_runtime(request)
+        return runtime.scan_networks()
+
+    @app.post("/api/jammer/start")
+    async def start_jammer(
+        body: WifiJammerRequest,
+        request: Request,
+        _: None = Depends(_authorize),
+    ):
+        """Start WiFi deauthentication attack"""
+        runtime = _get_runtime(request)
+        return runtime.start_wifi_jammer(body.model_dump(exclude_unset=True))
+
+    @app.post("/api/jammer/stop")
+    async def stop_jammer(request: Request, _: None = Depends(_authorize)):
+        """Stop WiFi deauthentication attack"""
+        runtime = _get_runtime(request)
+        return runtime.stop_wifi_jammer()
+
+    @app.get("/api/jammer/status")
+    async def get_jammer_status(request: Request):
+        """Get current jammer status"""
+        runtime = _get_runtime(request)
+        return runtime.get_jammer_status()
 
     return app

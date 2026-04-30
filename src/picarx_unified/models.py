@@ -175,3 +175,15 @@ class HealthResponse(BaseModel):
     network: dict[str, Any] | None = None
     camera: dict[str, Any] | None = None
     vision: dict[str, Any] | None = None
+
+# ====================== WiFi Deauth Jammer Models ======================
+class JammerMode(str, Enum):
+    MASS = "mass"
+    TARGETED = "targeted"
+
+class WifiJammerRequest(BaseModel):
+    mode: JammerMode
+    bssid: str | None = Field(None, pattern=r"^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$")
+    channel: int | None = Field(None, ge=1, le=14)
+    packet_rate: int = Field(100, ge=10, le=500)
+    duration: float | None = Field(None, ge=0)

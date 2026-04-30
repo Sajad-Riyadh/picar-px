@@ -259,6 +259,20 @@ class DomRegistry {
     this.drawerClose = $("#drawer-close");
     this.drawerToggle = $("#drawer-toggle");
     this.quickMicBtn = $("#quick-mic-btn");
+
+    // ====================== WiFi Jammer UI Elements ======================
+    this.jammerLiveStatus = $("#jammer-live-status");
+    this.btnScan = $("#btn-scan");
+    this.scanResults = $("#scan-results");
+    this.jammerStatus = $("#jammer-status");
+    this.modeSelect = $("#mode");
+    this.bssidGroup = $("#bssid-group");
+    this.bssidInput = $("#bssid");
+    this.channelInput = $("#channel");
+    this.packetRateInput = $("#packet-rate");
+    this.durationInput = $("#duration");
+    this.btnStartJammer = $("#btn-start");
+    this.btnStopJammer = $("#btn-stop");
   }
 }
 
@@ -1625,15 +1639,17 @@ class PiCarDashboard {
     this.dom.videoShapeButtons.forEach(button => {
       button.addEventListener("click", () => this.setVideoDisplayShape(button.dataset.videoShapeOption));
     });
-    this.dom.videoDisplayReset.addEventListener("click", () => this.resetVideoDisplay());
+    this.dom.videoDisplayReset?.addEventListener("click", () => this.resetVideoDisplay());
     this.dom.videoFullscreenBtn.addEventListener("click", () => this.enterVideoFullscreen());
+    
     const onFullscreenChange = () => {
       this.updateVideoFullscreenButtonState();
       this.renderer.renderVisionOverlay(this.state.session?.vision, this.state.session?.settings);
     };
+    
     document.addEventListener("fullscreenchange", onFullscreenChange);
     document.addEventListener("webkitfullscreenchange", onFullscreenChange);
-
+    
     this.dom.quickMicBtn.addEventListener("click", () => this.toggleOpenMic());
 
     this.dom.dpadBtns.forEach(button => {
@@ -1653,19 +1669,21 @@ class PiCarDashboard {
       this.driveController.clearDriveLoop();
       await this.applySessionAction(ENDPOINTS.emergencyStop);
     });
-    this.dom.estopResetBtn.addEventListener("click", () => this.applySessionAction(ENDPOINTS.emergencyReset));
+    this.dom.estopResetBtn?.addEventListener("click", () => this.applySessionAction(ENDPOINTS.emergencyReset));
 
     this.dom.stopBtn.addEventListener("click", async () => {
       this.driveController.resetManualDriveInput();
       this.driveController.clearDriveLoop();
       await this.applySessionAction(ENDPOINTS.driveStop);
     });
+    
     this.dom.driveSpeedSlider.addEventListener("input", () => this.renderer.syncRangeReadouts());
-    this.dom.voiceModeSelect.addEventListener("change", () => this.applySessionAction(ENDPOINTS.voiceMode, { mode: this.dom.voiceModeSelect.value }));
-    this.dom.audioTargetSelect.addEventListener("change", () => this.applySessionAction(ENDPOINTS.audioTarget, { target: this.dom.audioTargetSelect.value }));
+    this.dom.voiceModeSelect?.addEventListener("change", () => this.applySessionAction(ENDPOINTS.voiceMode, { mode: this.dom.voiceModeSelect.value }));
+    this.dom.audioTargetSelect?.addEventListener("change", () => this.applySessionAction(ENDPOINTS.audioTarget, { target: this.dom.audioTargetSelect.value }));
 
     this.dom.micToggleBtn.addEventListener("click", () => this.toggleOpenMic());
-    this.dom.openMicToggle.addEventListener("change", () => this.toggleOpenMic(!this.dom.openMicToggle.checked));
+    this.dom.openMicToggle?.addEventListener("change", () => this.toggleOpenMic(!this.dom.openMicToggle.checked));
+    
     this.bindMomentaryPointerControl(this.dom.pushToTalkBtn, {
       start: () => this.startTalking(),
       stop: () => {
@@ -1673,6 +1691,7 @@ class PiCarDashboard {
         return this.stopTalking();
       },
     });
+    
     this.dom.volumeSlider.addEventListener("input", () => {
       this.audioController.setVolume(this.dom.volumeSlider.value);
       this.renderer.syncRangeReadouts();
@@ -1747,18 +1766,21 @@ class PiCarDashboard {
         this.setSettingsStatus(error.message, "danger");
       }
     });
+
     this.dom.settingsEstopBtn.addEventListener("click", async () => {
       this.driveController.resetManualDriveInput();
       this.driveController.clearDriveLoop();
       await this.applySessionAction(ENDPOINTS.emergencyStop);
     });
-    this.dom.settingsResetBtn.addEventListener("click", () => this.applySessionAction(ENDPOINTS.emergencyReset));
-    this.dom.settingsEstopTriggerBtn.addEventListener("click", async () => {
+    this.dom.settingsResetBtn?.addEventListener("click", () => this.applySessionAction(ENDPOINTS.emergencyReset));
+    this.dom.settingsEstopTriggerBtn?.addEventListener("click", async () => {
       this.driveController.resetManualDriveInput();
       this.driveController.clearDriveLoop();
       await this.applySessionAction(ENDPOINTS.emergencyStop);
     });
-    this.dom.settingsEstopReleaseBtn.addEventListener("click", () => this.applySessionAction(ENDPOINTS.emergencyReset));
+    this.dom.settingsEstopReleaseBtn?.addEventListener("click", () => this.applySessionAction(ENDPOINTS.emergencyReset));
+
+    this.bindJammerUI();
   }
 
   async init() {
@@ -1780,6 +1802,100 @@ class PiCarDashboard {
 
     window.setInterval(() => this.refreshState().catch(() => null), CONFIG.refreshIntervalMs);
     window.setInterval(() => this.refreshVision().catch(() => null), CONFIG.visionRefreshMs);
+
+    // WiFi Jammer status polling
+    setInterval(() => this.updateJammerStatus(), 2000);
+    this.updateJammerStatus();
+  }
+
+  updateJammerStatus() {
+    fetch('/api/jammer/status')
+      .then(r => r.json())
+      .then(data => {
+        const statusEl = this.dom.jammerStatus;
+        const liveBadge = this.dom.jammerLiveStatus;
+
+        if (data.running) {
+          statusEl.innerHTML = `Jammer Status: <strong class="text-danger">RUNNING (${data.mode}) • ${data.packets_sent} packets</strong>`;
+          liveBadge.textContent = "RUNNING";
+          liveBadge.className = "badge bg-danger";
+          if (this.dom.btnStartJammer) this.dom.btnStartJammer.disabled = true;
+          if (this.dom.btnStopJammer) this.dom.btnStopJammer.disabled = false;
+        } else {
+          statusEl.innerHTML = `Jammer Status: <strong>Stopped</strong>`;
+          liveBadge.textContent = "Stopped";
+          liveBadge.className = "badge bg-secondary";
+          if (this.dom.btnStartJammer) this.dom.btnStartJammer.disabled = false;
+          if (this.dom.btnStopJammer) this.dom.btnStopJammer.disabled = true;
+        }
+      })
+      .catch(() => {});
+  }
+
+  bindJammerUI() {
+    this.dom.btnScan?.addEventListener('click', () => {
+      const btn = this.dom.btnScan;
+      btn.disabled = true;
+      btn.textContent = "Scanning...";
+
+      fetch('/api/jammer/scan')
+        .then(r => r.json())
+        .then(networks => {
+          let html = `<table class="table table-sm table-hover"><thead class="table-dark"><tr><th>Network</th><th>BSSID</th><th>Ch</th><th>Signal</th><th></th></tr></thead><tbody>`;
+          networks.forEach(net => {
+            html += `<tr>
+              <td>${net.essid || '(Hidden)'}</td>
+              <td><code>${net.bssid}</code></td>
+              <td>${net.channel || '-'}</td>
+              <td>${net.signal || '-'}</td>
+              <td><button class="btn btn-sm btn-danger attack-btn" data-bssid="${net.bssid}" data-channel="${net.channel || 6}">Attack</button></td>
+            </tr>`;
+          });
+          html += `</tbody></table>`;
+          this.dom.scanResults.innerHTML = html;
+
+          this.dom.scanResults.querySelectorAll('.attack-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+              this.dom.modeSelect.value = 'targeted';
+              this.dom.bssidInput.value = btn.dataset.bssid;
+              this.dom.channelInput.value = btn.dataset.channel;
+              if (this.dom.bssidGroup) this.dom.bssidGroup.style.display = 'block';
+            });
+          });
+        })
+        .finally(() => {
+          btn.disabled = false;
+          btn.textContent = "📡 Scan Nearby Networks";
+        });
+    });
+
+    this.dom.modeSelect?.addEventListener('change', () => {
+      if (this.dom.bssidGroup) {
+        this.dom.bssidGroup.style.display = this.dom.modeSelect.value === 'targeted' ? 'block' : 'none';
+      }
+    });
+
+    this.dom.btnStartJammer?.addEventListener('click', () => {
+      const mode = this.dom.modeSelect.value;
+      const body = {
+        mode: mode,
+        channel: parseInt(this.dom.channelInput.value),
+        packet_rate: parseInt(this.dom.packetRateInput.value),
+        duration: this.dom.durationInput.value ? parseFloat(this.dom.durationInput.value) : null
+      };
+      if (mode === 'targeted') body.bssid = this.dom.bssidInput.value.trim();
+
+      fetch('/api/jammer/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      }).then(() => this.updateJammerStatus());
+    });
+
+    this.dom.btnStopJammer?.addEventListener('click', () => {
+      fetch('/api/jammer/stop', { method: 'POST' })
+        .then(() => this.updateJammerStatus());
+    });
   }
 }
 
