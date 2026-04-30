@@ -266,6 +266,71 @@ Example:
 http://192.168.1.42:8080/
 ```
 
+Friendly hostname access is optional. On Raspberry Pi OS, install and enable Avahi/mDNS, then use the Pi hostname:
+
+```bash
+sudo apt install avahi-daemon
+sudo systemctl enable --now avahi-daemon
+sudo hostnamectl set-hostname picarx
+```
+
+Then open:
+
+```text
+http://picarx.local:8080/
+```
+
+The installer includes `avahi-daemon` and enables it when `systemctl` is available, but it does not change your hostname automatically.
+
+Important browser detail: `picarx.local` makes the dashboard easier to remember, but a `.local` HTTP page is still usually not a secure browser context. Control, camera, emergency stop, and HTTP API access continue to work over `http://<pi-ip>:8080/` and `http://picarx.local:8080/`, but microphone access normally needs `https://...` or `http://localhost:...`.
+
+### Localhost SSH tunnel for microphone development
+
+For the most reliable microphone path while developing, forward the Pi dashboard to localhost:
+
+```bash
+ssh -L 8080:127.0.0.1:8080 car@192.168.2.249
+```
+
+Then open:
+
+```text
+http://localhost:8080/
+```
+
+This keeps the Pi serving the same app on the same port, but your browser sees the page as `localhost`. Modern browsers treat localhost as secure enough for `navigator.mediaDevices.getUserMedia()`, so the microphone can work even though the app itself is still using plain HTTP through the tunnel.
+
+### Optional HTTPS
+
+The app can serve HTTPS directly through Uvicorn when certificate files are configured. Create a local self-signed certificate for LAN testing:
+
+```bash
+mkdir -p certs
+openssl req -x509 -newkey rsa:2048 -nodes \
+  -keyout certs/picarx.key \
+  -out certs/picarx.crt \
+  -days 365 \
+  -subj "/CN=picarx.local"
+```
+
+Set these values in `.env`:
+
+```text
+PICARX_HTTPS_ENABLE=true
+PICARX_SSL_CERTFILE=certs/picarx.crt
+PICARX_SSL_KEYFILE=certs/picarx.key
+```
+
+Restart the app, then open:
+
+```text
+https://picarx.local:8080/
+```
+
+Browsers will show a certificate warning unless the certificate is trusted. For a smoother setup, use a trusted local CA tool such as `mkcert` if it is available on your development machine and Pi workflow.
+
+HTTPS is enabled only when `PICARX_HTTPS_ENABLE=true` and both certificate files exist. If the files are missing, the app stays on normal HTTP so existing IP access is not removed.
+
 ### SSH control examples
 
 Drive forward:
@@ -339,6 +404,111 @@ sudo systemctl status picarx-unified.service
 ```
 
 The service runs the same bootstrap script in `--run-only` mode, so the manual flow and boot flow stay aligned.
+
+## Microphone works on localhost SSH tunnel but not on Pi IP
+
+Root cause: browser microphone APIs require a secure context. `http://localhost:8080/` is treated as secure enough by modern browsers, including when it reaches the Pi through SSH local port forwarding. `http://192.168.2.249:8080/` is plain HTTP over a LAN IP address, so it is usually not a secure context and `navigator.mediaDevices.getUserMedia()` may be missing or blocked.
+
+What still works over plain HTTP/IP:
+
+- Dashboard loading
+- Motor and manual control
+- Emergency stop and reset
+- Ultrasonic safety
+- Camera MJPEG stream
+- REST APIs and WebSocket connection
+- AI and voice backend paths that do not require the browser microphone permission
+
+What usually needs HTTPS or localhost:
+
+- Browser microphone capture with `navigator.mediaDevices.getUserMedia()`
+- Browser speech recognition in browsers that apply the same secure-context policy
+
+The frontend logs microphone diagnostics before requesting audio:
+
+- `window.isSecureContext`
+- `location.protocol`
+- `location.hostname`
+- whether the hostname is `localhost`, `127.0.0.1`, or `::1`
+- whether `navigator.mediaDevices` exists
+- whether `navigator.mediaDevices.getUserMedia` exists
+
+If the page is not secure enough, the Voice panel shows:
+
+```text
+Microphone requires HTTPS or localhost. Current page is not a secure context. Use SSH tunnel localhost or enable HTTPS.
+```
+
+Use the reliable localhost tunnel:
+
+```bash
+ssh -L 8080:127.0.0.1:8080 car@192.168.2.249
+```
+
+Then open:
+
+```text
+http://localhost:8080/
+```
+
+Use a friendly hostname with mDNS:
+
+```bash
+sudo apt install avahi-daemon
+sudo systemctl enable --now avahi-daemon
+sudo hostnamectl set-hostname picarx
+```
+
+Then open:
+
+```text
+http://picarx.local:8080/
+```
+
+Hostname access is friendlier than an IP address, but hostname alone does not guarantee microphone permission. A `.local` URL over plain HTTP may still be non-secure in the browser.
+
+Use optional HTTPS when you want microphone access without the SSH localhost tunnel:
+
+```bash
+mkdir -p certs
+openssl req -x509 -newkey rsa:2048 -nodes \
+  -keyout certs/picarx.key \
+  -out certs/picarx.crt \
+  -days 365 \
+  -subj "/CN=picarx.local"
+```
+
+Then set:
+
+```text
+PICARX_HTTPS_ENABLE=true
+PICARX_SSL_CERTFILE=certs/picarx.crt
+PICARX_SSL_KEYFILE=certs/picarx.key
+```
+
+Restart the app and open:
+
+```text
+https://picarx.local:8080/
+```
+
+Verification commands:
+
+```bash
+curl http://127.0.0.1:8080/api/health
+curl http://picarx.local:8080/api/health
+openssl s_client -connect picarx.local:8080
+```
+
+When HTTPS is active, `/api/health` includes a `network` block with the configured host, configured port, Pi hostname, public dashboard URL guesses, and whether HTTPS is actually enabled.
+
+Optional Wi-Fi Access Point plan, not implemented here:
+
+- The Pi can later create its own Wi-Fi network.
+- A phone or laptop connects directly to the Pi network.
+- The dashboard opens through `picarx.local:8080` or the Pi hotspot IP.
+- SSH remains available on the Pi network.
+- Browser microphone access still needs HTTPS, localhost tunneling, or a trusted certificate. Hotspot mode alone does not make LAN HTTP a secure context.
 
 ## Camera color troubleshooting
 

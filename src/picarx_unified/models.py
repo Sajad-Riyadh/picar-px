@@ -172,5 +172,6 @@ class HealthResponse(BaseModel):
     camera_backend: str
     ai_provider: str
     browser_clients: int
+    network: dict[str, Any] | None = None
     camera: dict[str, Any] | None = None
     vision: dict[str, Any] | None = None

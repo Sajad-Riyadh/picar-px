@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import socket
 import threading
 import time
 
@@ -124,12 +125,26 @@ class RobotRuntime:
             return len(self._browser_clients)
 
     def health(self) -> HealthResponse:
+        scheme = "https" if self.config.https_enabled else "http"
+        system_hostname = socket.gethostname()
+        public_hosts = [system_hostname, f"{system_hostname}.local"]
+        public_urls = [f"{scheme}://{host}:{self.config.port}/" for host in public_hosts if host]
         return HealthResponse(
             ok=True,
             hardware_backend=self.hardware.backend_name,
             camera_backend=self.camera.backend_name,
             ai_provider=self.ai.provider_name,
             browser_clients=self.browser_client_count,
+            network={
+                "configured_host": self.config.host,
+                "configured_port": self.config.port,
+                "system_hostname": system_hostname,
+                "https_enabled": self.config.https_enabled,
+                "https_requested": self.config.https_enable,
+                "ssl_certfile": str(self.config.ssl_certfile) if self.config.ssl_certfile else None,
+                "ssl_keyfile": str(self.config.ssl_keyfile) if self.config.ssl_keyfile else None,
+                "public_dashboard_urls": public_urls,
+            },
             camera=self.camera.diagnostics(),
             vision=self.vision.diagnostics(),
         )

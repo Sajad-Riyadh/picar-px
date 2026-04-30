@@ -74,10 +74,23 @@ def _env_path(name: str, default: Path) -> Path:
     return candidate
 
 
+def _env_optional_path(name: str) -> Path | None:
+    raw_value = _env_text(name)
+    if not raw_value:
+        return None
+    candidate = Path(raw_value).expanduser()
+    if not candidate.is_absolute():
+        candidate = (PROJECT_ROOT / candidate).resolve()
+    return candidate
+
+
 @dataclass(slots=True)
 class AppConfig:
     host: str
     port: int
+    https_enable: bool
+    ssl_certfile: Path | None
+    ssl_keyfile: Path | None
     state_dir: Path
     static_dir: Path
     camera_width: int
@@ -118,6 +131,16 @@ class AppConfig:
     gemini_native_audio_model: str
     gemini_transcription_model: str
 
+    @property
+    def https_enabled(self) -> bool:
+        return (
+            self.https_enable
+            and self.ssl_certfile is not None
+            and self.ssl_keyfile is not None
+            and self.ssl_certfile.exists()
+            and self.ssl_keyfile.exists()
+        )
+
     @classmethod
     def from_env(cls) -> "AppConfig":
         _load_env_file(PROJECT_ROOT / ".env")
@@ -126,6 +149,9 @@ class AppConfig:
         return cls(
             host=_env_text("PICARX_HOST", "0.0.0.0") or "0.0.0.0",
             port=_env_int("PICARX_PORT", 8080),
+            https_enable=_env_flag("PICARX_HTTPS_ENABLE", False),
+            ssl_certfile=_env_optional_path("PICARX_SSL_CERTFILE"),
+            ssl_keyfile=_env_optional_path("PICARX_SSL_KEYFILE"),
             state_dir=state_dir,
             static_dir=static_dir,
             camera_width=_env_int("PICARX_CAMERA_WIDTH", 640),

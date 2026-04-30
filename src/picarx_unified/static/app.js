@@ -108,6 +108,25 @@ function videoElementDiagnostics(videoStream, videoFrame) {
   };
 }
 
+function browserMicDiagnostics() {
+  const hostname = location.hostname;
+  const normalizedHostname = hostname.toLowerCase();
+  const isLocalhost = normalizedHostname === "localhost"
+    || normalizedHostname === "127.0.0.1"
+    || normalizedHostname === "::1"
+    || normalizedHostname === "[::1]";
+  const hasMediaDevices = !!navigator.mediaDevices;
+  const hasGetUserMedia = typeof navigator.mediaDevices?.getUserMedia === "function";
+  return {
+    isSecureContext: window.isSecureContext,
+    protocol: location.protocol,
+    hostname,
+    isLocalhost,
+    hasMediaDevices,
+    hasGetUserMedia,
+  };
+}
+
 class DomRegistry {
   constructor() {
     this.cache();
@@ -552,8 +571,19 @@ class AudioController {
   }
 
   async ensureCapturePipeline() {
-    await this.ensureAudioContext();
     if (this.state.mediaStream && this.state.workletNode) return;
+    const diagnostics = browserMicDiagnostics();
+    this.state.lastMicDiagnostics = diagnostics;
+    console.info("PiCar-X microphone diagnostics", diagnostics);
+    if (!diagnostics.isSecureContext) {
+      throw new Error(
+        "Microphone requires HTTPS or localhost. Current page is not a secure context. Use SSH tunnel localhost or enable HTTPS.",
+      );
+    }
+    if (!diagnostics.hasMediaDevices || !diagnostics.hasGetUserMedia) {
+      throw new Error("Browser microphone API is unavailable. Try HTTPS, localhost, or a browser that supports getUserMedia.");
+    }
+    await this.ensureAudioContext();
     this.state.mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
     this.state.sourceNode = this.state.audioContext.createMediaStreamSource(this.state.mediaStream);
     this.state.workletNode = new AudioWorkletNode(this.state.audioContext, "pcm-capture");
@@ -1049,6 +1079,7 @@ class PiCarDashboard {
       videoDisplayShape: "camera",
       volume: 80,
       voiceSocketConnected: false,
+      lastMicDiagnostics: browserMicDiagnostics(),
     };
 
     this.dom = new DomRegistry();
@@ -1115,6 +1146,20 @@ class PiCarDashboard {
 
   canTranscribeAiReplyTurn() {
     return this.hasBrowserSpeechRecognition() || this.hasServerTranscription();
+  }
+
+  resetMicControls() {
+    this.state.openMic = false;
+    this.state.captureActive = false;
+    this.state.awaitingReply = false;
+    if (this.dom.openMicToggle) this.dom.openMicToggle.checked = false;
+    if (this.dom.micToggleBtn) {
+      this.dom.micToggleBtn.textContent = "Open Mic";
+      this.dom.micToggleBtn.classList.remove("btn-danger");
+      this.dom.micToggleBtn.classList.add("btn-accent");
+    }
+    this.setButtonActive(this.dom.pushToTalkBtn, false);
+    this.updateMicBadge();
   }
 
   setButtonActive(button, active) {
@@ -1406,25 +1451,31 @@ class PiCarDashboard {
   }
 
   async startTalking() {
+    const diagnostics = browserMicDiagnostics();
+    this.state.lastMicDiagnostics = diagnostics;
+    console.info("PiCar-X microphone diagnostics", diagnostics);
     if (this.state.session?.voice_mode === "mute") {
       this.setSpeechStatus("Switch voice mode out of Mute first.", "neutral");
-      return;
+      return false;
     }
     if (this.state.session?.voice_mode === "ai_reply" && !this.canTranscribeAiReplyTurn()) {
       this.setSpeechStatus(
         "AI Reply needs browser speech recognition or GEMINI_API_KEY-backed server transcription.",
         "danger",
       );
-      this.state.openMic = false;
-      this.dom.openMicToggle.checked = false;
-      this.dom.micToggleBtn.textContent = "Open Mic";
-      this.dom.micToggleBtn.classList.remove("btn-danger");
-      this.dom.micToggleBtn.classList.add("btn-accent");
-      this.updateMicBadge();
-      return;
+      this.resetMicControls();
+      return false;
     }
-    await this.voiceSocket.open();
-    await this.audioController.ensureCapturePipeline();
+    try {
+      await this.voiceSocket.open();
+      await this.audioController.ensureCapturePipeline();
+    } catch (error) {
+      const message = error?.message || "Unable to open browser microphone.";
+      this.resetMicControls();
+      this.setSpeechStatus(message, "danger");
+      this.logMessage("system", message);
+      return false;
+    }
     this.configureSpeechRecognition();
     this.state.transcript = "";
     this.state.awaitingReply = false;
@@ -1437,6 +1488,7 @@ class PiCarDashboard {
       } catch (_) {}
     }
     this.setSpeechStatus("Listening...", "cool");
+    return true;
   }
 
   async stopTalking() {
@@ -1483,7 +1535,10 @@ class PiCarDashboard {
       this.dom.micToggleBtn.textContent = "Mic On - Stop";
       this.dom.micToggleBtn.classList.remove("btn-accent");
       this.dom.micToggleBtn.classList.add("btn-danger");
-      await this.startTalking();
+      const started = await this.startTalking();
+      if (!started) {
+        this.resetMicControls();
+      }
     }
     this.updateMicBadge();
   }

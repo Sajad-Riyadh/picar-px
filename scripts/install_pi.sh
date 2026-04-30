@@ -128,7 +128,12 @@ install_system_packages() {
     python3-picamera2 \
     rpicam-apps-lite \
     espeak-ng \
-    alsa-utils
+    alsa-utils \
+    avahi-daemon
+
+  if command -v systemctl >/dev/null 2>&1; then
+    run_root systemctl enable --now avahi-daemon || true
+  fi
 }
 
 install_sunfounder_stack() {
