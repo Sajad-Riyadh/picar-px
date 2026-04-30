@@ -8,11 +8,13 @@ Type=simple
 User=root
 Group=root
 WorkingDirectory=/home/car/picar-px
+EnvironmentFile=-/home/car/picar-px/.env
 Environment=PATH=/home/car/picar-px/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-Environment=HOME=/home/car
-Environment=PICARX_HOST=0.0.0.0
-Environment=PICARX_PORT=8080
-ExecStartPre=/bin/bash -c 'until i2cdetect -y 1 >/dev/null 2>&1; do sleep 2; done'
+Environment=HOME=/root
+Environment=USER=root
+Environment=LOGNAME=root
+Environment=PYTHONUNBUFFERED=1
+ExecStartPre=/bin/bash -c 'for i in {1..30}; do i2cdetect -y 1 | grep -q "14" && exit 0; sleep 2; done; i2cdetect -y 1 || true'
 ExecStart=/home/car/picar-px/.venv/bin/python -m picarx_unified
 Restart=on-failure
 RestartSec=5

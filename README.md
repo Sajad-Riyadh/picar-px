@@ -179,7 +179,9 @@ That one file will:
 3. Create or reuse `.venv` with Raspberry Pi system packages visible so `picamera2` works inside the environment
 4. Install this project in editable mode without replacing Raspberry Pi OS camera packages such as `numpy`, `simplejpeg`, and `picamera2`
 5. Create `.env` from `.env.example` on first run
-6. Start the web app
+6. Fill in missing safe defaults such as `PICARX_USE_MOCK=false` and `PICARX_HARDWARE_INIT_MODE=direct`
+7. Install and enable a path-correct `picarx-unified.service` for reboot startup
+8. Start the web app
 
 Open the dashboard at `http://<pi-ip-address>:8080/` when startup finishes.
 
@@ -195,31 +197,36 @@ bash scripts/install_pi.sh --run-only
 # force mock hardware and mock camera mode
 bash scripts/install_pi.sh --mock
 
+# install packages/env/service but do not start a foreground app
+bash scripts/install_pi.sh --install-only
+
+# install/update and start the boot service instead of a foreground app
+bash scripts/install_pi.sh --service
+
 # override bind host and port for the current run
 bash scripts/install_pi.sh --run-only --host 0.0.0.0 --port 8080
 ```
 
-The script auto-loads `.env` if it exists, so optional settings such as `GEMINI_API_KEY` and `PICARX_API_TOKEN` can live there.
+The script auto-loads `.env` if it exists, so optional settings such as `GEMINI_API_KEY` and `PICARX_API_TOKEN` can live there. It also writes a systemd unit using the actual project directory, so installs under `/root/picar-px`, `/home/car/picar-px`, or another path do not need manual unit edits.
 
 ### Hardware initialization mode
 
 The motor/servo backend is controlled by `.env`:
 
 ```text
-PICARX_USE_MOCK=true
-PICARX_HARDWARE_INIT_MODE=auto
-```
-
-`PICARX_USE_MOCK=true` is safe dashboard mode. The camera, API, AI, and browser UI can run, but drive commands do not move the car.
-
-When real hardware is ready, set:
-
-```text
 PICARX_USE_MOCK=false
 PICARX_HARDWARE_INIT_MODE=direct
 ```
 
-`direct` initializes SunFounder `Picarx()` in the service process at startup. Use this when the same command works manually but background probe mode stays on `MockPicarx`.
+`direct` initializes SunFounder `Picarx()` in the service process at startup and includes a compatibility shim for SunFounder's `os.getlogin()` call under systemd. This is the default for real PiCar-X installs because it matches the manual hardware path that moves the car.
+
+For safe camera-only mode, set:
+
+```text
+PICARX_USE_MOCK=true
+```
+
+In mock mode, the camera, API, AI, and browser UI can run, but drive commands do not move the car.
 
 `auto` starts with `MockPicarx` and probes in the background. This is safer for boot timing, but on some cars it may not match the manual hardware environment.
 
@@ -416,16 +423,21 @@ If you enable `PICARX_API_TOKEN`, add:
 
 ### Systemd startup
 
-Copy the service file, then enable it:
+The installer creates and enables `/etc/systemd/system/picarx-unified.service` automatically. To check it:
 
 ```bash
-sudo cp deploy/picarx-unified.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now picarx-unified.service
 sudo systemctl status picarx-unified.service
+sudo systemctl is-enabled picarx-unified.service
 ```
 
-The service runs the same bootstrap script in `--run-only` mode, so the manual flow and boot flow stay aligned.
+Start or restart it:
+
+```bash
+sudo systemctl restart picarx-unified.service
+curl http://127.0.0.1:8080/api/health
+```
+
+If you intentionally want to install the old template manually, inspect `deploy/picarx-unified.service` first and adjust `WorkingDirectory`, `EnvironmentFile`, `PATH`, and `ExecStart` to your actual project path. The installer is preferred because it writes those values for you.
 
 ## Microphone works on localhost SSH tunnel but not on Pi IP
 

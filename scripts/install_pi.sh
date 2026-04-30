@@ -5,11 +5,15 @@ PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VENV_DIR="$PROJECT_DIR/.venv"
 ENV_FILE="$PROJECT_DIR/.env"
 ENV_EXAMPLE_FILE="$PROJECT_DIR/.env.example"
+SERVICE_NAME="picarx-unified.service"
+SERVICE_FILE="/etc/systemd/system/$SERVICE_NAME"
 
 INSTALL_DEPS=1
 RUN_APP=1
+START_SERVICE=0
 MOCK_MODE=0
 SKIP_SUNFOUNDER=0
+INSTALL_SERVICE=1
 HOST_OVERRIDE=""
 PORT_OVERRIDE=""
 
@@ -40,12 +44,15 @@ What it does by default:
   2. Installs the official SunFounder PiCar-X Python stack if needed
   3. Creates/updates the local virtual environment
   4. Copies .env.example to .env on first run
-  5. Launches the app
+  5. Installs/enables a path-correct systemd service
+  6. Launches the app
 
 Options:
   --install-only        Install everything but do not start the app
+  --service             Install/update and start the systemd service instead of a foreground app
   --run-only            Skip installation and just run the app
   --mock                Run in mock hardware/camera mode
+  --no-service          Do not install or update the systemd service
   --skip-sunfounder     Do not auto-install the official SunFounder stack
   --host HOST           Override PICARX_HOST for this run
   --port PORT           Override PICARX_PORT for this run
@@ -55,6 +62,7 @@ Examples:
   bash scripts/install_pi.sh
   bash scripts/install_pi.sh --mock
   bash scripts/install_pi.sh --install-only
+  bash scripts/install_pi.sh --service
   bash scripts/install_pi.sh --run-only --host 0.0.0.0 --port 8080
 EOF
 }
@@ -64,11 +72,18 @@ while (($# > 0)); do
     --install-only)
       RUN_APP=0
       ;;
+    --service)
+      RUN_APP=0
+      START_SERVICE=1
+      ;;
     --run-only)
       INSTALL_DEPS=0
       ;;
     --mock)
       MOCK_MODE=1
+      ;;
+    --no-service)
+      INSTALL_SERVICE=0
       ;;
     --skip-sunfounder)
       SKIP_SUNFOUNDER=1
@@ -197,6 +212,28 @@ ensure_env_file() {
   cp "$ENV_EXAMPLE_FILE" "$ENV_FILE"
 }
 
+ensure_env_default() {
+  local key="$1"
+  local value="$2"
+  if [[ ! -f "$ENV_FILE" ]]; then
+    return
+  fi
+  if grep -qE "^${key}=" "$ENV_FILE"; then
+    return
+  fi
+  printf '%s=%s\n' "$key" "$value" >> "$ENV_FILE"
+}
+
+ensure_env_defaults() {
+  ensure_env_default "PICARX_HOST" "0.0.0.0"
+  ensure_env_default "PICARX_PORT" "8080"
+  ensure_env_default "PICARX_USE_MOCK" "false"
+  ensure_env_default "PICARX_HARDWARE_INIT_MODE" "direct"
+  ensure_env_default "PICARX_HTTPS_ENABLE" "false"
+  ensure_env_default "PICARX_SSL_CERTFILE" ""
+  ensure_env_default "PICARX_SSL_KEYFILE" ""
+}
+
 load_env_file() {
   if [[ ! -f "$ENV_FILE" ]]; then
     return
@@ -226,8 +263,60 @@ load_env_file() {
   done < "$ENV_FILE"
 }
 
+ensure_hostname_resolution() {
+  local current_hostname
+  current_hostname="$(hostname 2>/dev/null || true)"
+  [[ -n "$current_hostname" ]] || return
+  if grep -qE "^[[:space:]]*127\\.0\\.1\\.1[[:space:]].*\\b${current_hostname}\\b" /etc/hosts 2>/dev/null; then
+    return
+  fi
+  log "Adding hostname '$current_hostname' to /etc/hosts for sudo/systemd compatibility"
+  printf '127.0.1.1 %s\n' "$current_hostname" | run_root tee -a /etc/hosts >/dev/null
+}
+
+install_systemd_service() {
+  (( INSTALL_SERVICE )) || return
+  command -v systemctl >/dev/null 2>&1 || return
+
+  log "Installing systemd service at $SERVICE_FILE"
+  local tmp_service
+  tmp_service="$(mktemp /tmp/picarx-unified-service-XXXXXX)"
+  cat > "$tmp_service" <<EOF
+[Unit]
+Description=PiCar-X Unified Control Stack
+After=network-online.target sound.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=$PROJECT_DIR
+EnvironmentFile=-$ENV_FILE
+Environment=PATH=$VENV_DIR/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=HOME=/root
+Environment=USER=root
+Environment=LOGNAME=root
+Environment=PYTHONUNBUFFERED=1
+ExecStartPre=/bin/bash -c 'for i in {1..30}; do i2cdetect -y 1 | grep -q "14" && exit 0; sleep 2; done; i2cdetect -y 1 || true'
+ExecStart=$VENV_DIR/bin/python -m picarx_unified
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  run_root cp "$tmp_service" "$SERVICE_FILE"
+  rm -f "$tmp_service"
+  run_root systemctl daemon-reload
+  run_root systemctl enable "$SERVICE_NAME"
+}
+
 prepare_runtime_env() {
   ensure_env_file
+  ensure_env_defaults
   load_env_file
 
   export PICARX_HOST="${HOST_OVERRIDE:-${PICARX_HOST:-0.0.0.0}}"
@@ -261,14 +350,25 @@ main() {
     install_sunfounder_stack
     ensure_virtualenv
     ensure_env_file
+    ensure_env_defaults
+    ensure_hostname_resolution
+    install_systemd_service
     prepare_runtime_env
   fi
 
   if (( RUN_APP )); then
     run_application
+  elif (( START_SERVICE )); then
+    command -v systemctl >/dev/null 2>&1 || fail "systemctl is required for --service"
+    log "Starting $SERVICE_NAME"
+    run_root systemctl restart "$SERVICE_NAME"
+    run_root systemctl status "$SERVICE_NAME" --no-pager
   else
     log "Installation complete"
     printf 'Run the app later with:\n  bash scripts/install_pi.sh --run-only\n'
+    if (( INSTALL_SERVICE )) && command -v systemctl >/dev/null 2>&1; then
+      printf 'Or start the boot service with:\n  sudo systemctl start %s\n' "$SERVICE_NAME"
+    fi
   fi
 }
 

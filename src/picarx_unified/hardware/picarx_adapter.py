@@ -117,8 +117,21 @@ class PicarxAdapter:
 
         max_retries = 60  # 60 × 5 s = up to 5 minutes
         probe_cmd = [
-            sys.executable, "-c",
-            "from picarx import Picarx; Picarx(); print('READY')",
+            sys.executable,
+            "-c",
+            (
+                "import os\n"
+                "original_getlogin = os.getlogin\n"
+                "def safe_getlogin():\n"
+                "    try:\n"
+                "        return original_getlogin()\n"
+                "    except OSError:\n"
+                "        return os.getenv('LOGNAME') or os.getenv('USER') or 'root'\n"
+                "os.getlogin = safe_getlogin\n"
+                "from picarx import Picarx\n"
+                "Picarx()\n"
+                "print('READY')\n"
+            ),
         ]
         # Ensure subprocess inherits a sane environment (HOME is critical for lgpio)
         probe_env = os.environ.copy()
