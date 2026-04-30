@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import subprocess
 import sys
 import threading
@@ -11,6 +12,25 @@ from typing import Any
 from ..config import AppConfig
 
 logger = logging.getLogger(__name__)
+
+
+def _create_picarx_hardware() -> Any:
+    """Create SunFounder Picarx even under systemd, where os.getlogin() fails."""
+    from picarx import Picarx
+
+    original_getlogin = os.getlogin
+
+    def safe_getlogin() -> str:
+        try:
+            return original_getlogin()
+        except OSError:
+            return os.getenv("LOGNAME") or os.getenv("USER") or "root"
+
+    os.getlogin = safe_getlogin
+    try:
+        return Picarx()
+    finally:
+        os.getlogin = original_getlogin
 
 
 @dataclass(slots=True)
@@ -75,10 +95,8 @@ class PicarxAdapter:
         init_mode = self._config.hardware_init_mode.strip().lower()
         if init_mode == "direct":
             try:
-                from picarx import Picarx
-
                 logger.info("Initializing real Picarx hardware directly")
-                return Picarx()
+                return _create_picarx_hardware()
             except Exception:
                 logger.exception("Direct Picarx hardware initialization failed")
                 return MockPicarx()
@@ -123,9 +141,7 @@ class PicarxAdapter:
                 continue
             # Probe succeeded — I2C and GPIO confirmed ready
             try:
-                from picarx import Picarx
-
-                hw = Picarx()
+                hw = _create_picarx_hardware()
                 with self._lock:
                     self._hardware = hw
                     self._backend_name = type(hw).__name__
