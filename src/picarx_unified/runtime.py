@@ -6,7 +6,6 @@ import logging
 import socket
 import threading
 import time
-from .attacks.wifi_jammer import WifiJammer
 from starlette.websockets import WebSocketDisconnect
 
 from .ai import AIService
@@ -36,6 +35,13 @@ from .vision import VisionService
 
 logger = logging.getLogger(__name__)
 
+try:
+    from .attacks.wifi_jammer import WifiJammer
+except ModuleNotFoundError as exc:
+    if exc.name not in {"scapy", "picarx_unified.attacks", "picarx_unified.attacks.wifi_jammer"}:
+        raise
+    WifiJammer = None
+
 
 def _is_expected_websocket_disconnect(exc: BaseException) -> bool:
     current: BaseException | None = exc
@@ -47,6 +53,32 @@ def _is_expected_websocket_disconnect(exc: BaseException) -> bool:
             return True
         current = current.__cause__ or current.__context__
     return False
+
+
+class UnavailableWifiJammer:
+    def scan_networks(self) -> list:
+        return []
+
+    def start(self, **_config) -> dict:
+        return {
+            "status": "unavailable",
+            "message": "WiFi tooling is not installed in this environment.",
+        }
+
+    def stop(self) -> dict:
+        return {"status": "stopped", "packets_sent": 0}
+
+    def get_status(self) -> dict:
+        return {
+            "running": False,
+            "mode": None,
+            "target_bssid": None,
+            "channel": None,
+            "packets_sent": 0,
+            "uptime_seconds": 0,
+            "own_channel": None,
+            "available": False,
+        }
 
 
 class RobotRuntime:
@@ -91,8 +123,7 @@ class RobotRuntime:
             stop_autonomous_drive=self.stop_autonomous_drive,
         )
 
-        # WiFi Deauth Jammer (educational feature - uses only wlan1, protects SSH on wlan0)
-        self.jammer = WifiJammer(monitor_interface="wlan1")
+        self.jammer = WifiJammer(monitor_interface="wlan1") if WifiJammer is not None else UnavailableWifiJammer()
 
     def start(self, loop: asyncio.AbstractEventLoop) -> None:
         if self._running:
