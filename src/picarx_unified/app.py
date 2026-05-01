@@ -8,11 +8,14 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request, WebSocket
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 from .config import AppConfig
-from .models import AudioTargetRequest, CameraRequest, DriveRequest, ModeRequest, SettingsUpdateRequest, VisionQuestionRequest, WifiJammerRequest
+from .models import (
+    AudioTargetRequest, CameraRequest, DriveRequest, ModeRequest,
+    SettingsUpdateRequest, VisionQuestionRequest
+)
 from .runtime import RobotRuntime
 from .safety import SafetyViolation
 from .voice import VoiceConnection
-from .attacks.wifi_jammer import WifiJammer
+from .attacks.wifi_jammer import WifiJammer, JammerMode
 
 def _authorize(request: Request, authorization: Annotated[str | None, Header()] = None) -> None:
     token = request.app.state.runtime.config.api_token
@@ -47,7 +50,7 @@ def create_app() -> FastAPI:
         app.state.wifi_jammer = wifi_jammer
         yield
         runtime.stop()
-        wifi_jammer.stop()
+        wifi_jammer.cleanup()
 
     app = FastAPI(title="PiCar-X Unified", lifespan=lifespan)
 
@@ -175,36 +178,78 @@ def create_app() -> FastAPI:
         await connection.run()
 
     # WiFi Jammer endpoints
-    @app.get("/api/wifi/scan")
-    async def wifi_scan(request: Request, _: None = Depends(_authorize)):
-        """Scan for nearby WiFi networks"""
-        return {"networks": request.app.state.wifi_jammer.scan_networks()}
+    @app.get("/api/jammer/robot_network")
+    async def jammer_robot_network(request: Request):
+        """Get information about the robot's own network"""
+        return request.app.state.wifi_jammer.get_robot_network()
 
-    @app.post("/api/wifi/jammer/start")
-    async def wifi_jammer_start(
+    @app.get("/api/jammer/scan")
+    async def jammer_scan(request: Request, duration: int = 10):
+        """Scan for nearby WiFi networks"""
+        try:
+            networks = request.app.state.wifi_jammer.scan_networks(duration=duration)
+            return {"networks": networks, "count": len(networks)}
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @app.post("/api/jammer/start")
+    async def jammer_start(
         request: Request,
-        body: WifiJammerRequest,
+        body: dict,
         _: None = Depends(_authorize),
     ):
         """Start WiFi jammer in mass or targeted mode"""
-        jammer = request.app.state.wifi_jammer
-        result = jammer.start(
-            mode=body.mode,
-            bssid=body.bssid,
-            channel=body.channel,
-            packet_rate=body.packet_rate,
-            duration=body.duration
-        )
-        return result
+        try:
+            jammer = request.app.state.wifi_jammer
 
-    @app.post("/api/wifi/jammer/stop")
-    async def wifi_jammer_stop(request: Request, _: None = Depends(_authorize)):
+            # Extract parameters
+            mode = body.get("mode", "mass")
+            target_bssids = body.get("target_bssids", [])
+            channel = body.get("channel")
+            pps = body.get("pps", 100)
+            duration = body.get("duration")
+
+            # Validate mode
+            if mode not in ["mass", "targeted"]:
+                raise HTTPException(status_code=400, detail="Invalid mode. Use 'mass' or 'targeted'")
+
+            # Validate targets
+            if not target_bssids:
+                raise HTTPException(status_code=400, detail="No target BSSIDs provided")
+
+            # Start attack
+            result = jammer.start_attack(
+                mode=mode,
+                target_bssids=target_bssids,
+                channel=channel,
+                packet_rate=pps,
+                duration=duration
+            )
+
+            if result.get("status") == "error":
+                raise HTTPException(status_code=400, detail=result.get("message"))
+
+            return result
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @app.post("/api/jammer/stop")
+    async def jammer_stop(request: Request, _: None = Depends(_authorize)):
         """Stop WiFi jammer"""
-        return request.app.state.wifi_jammer.stop()
+        try:
+            return request.app.state.wifi_jammer.stop_attack()
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
 
-    @app.get("/api/wifi/jammer/status")
-    async def wifi_jammer_status(request: Request):
+    @app.get("/api/jammer/status")
+    async def jammer_status(request: Request):
         """Get WiFi jammer status"""
-        return request.app.state.wifi_jammer.get_status()
+        try:
+            return request.app.state.wifi_jammer.get_status()
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
 
     return app
