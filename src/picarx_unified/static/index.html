@@ -517,6 +517,10 @@
                 <input type="radio" name="attack-mode" value="targeted" />
                 <span>Targeted Deauth (Single BSSID)</span>
               </label>
+              <label class="radio-label">
+                <input type="radio" name="attack-mode" value="client" />
+                <span>Client Deauth (Specific Devices)</span>
+              </label>
             </div>
           </div>
 
@@ -525,6 +529,22 @@
             <input id="target-bssid-input" type="text" placeholder="AA:BB:CC:DD:EE:FF" pattern="^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$" />
             <label class="field-label">Channel (optional):</label>
             <input id="target-channel-input" type="number" min="1" max="14" placeholder="Auto" />
+          </div>
+
+          <div id="client-input-section" class="targeted-section hidden">
+            <label class="field-label">Select Network to Discover Clients:</label>
+            <select id="client-network-select">
+              <option value="">-- Select a network first --</option>
+            </select>
+            <button id="discover-clients-btn" class="btn btn-primary btn-sm">Discover Clients</button>
+            <div id="client-list" class="client-list">
+              <div class="network-placeholder">Select a network and click "Discover Clients"</div>
+            </div>
+            <div class="client-controls">
+              <button id="select-all-clients-btn" class="btn btn-xs btn-outline">Select All Clients</button>
+              <button id="deselect-all-clients-btn" class="btn btn-xs btn-outline">Deselect All Clients</button>
+              <button id="select-except-robot-client-btn" class="btn btn-xs btn-accent">Select All Except Robot</button>
+            </div>
           </div>
 
           <div class="attack-params">

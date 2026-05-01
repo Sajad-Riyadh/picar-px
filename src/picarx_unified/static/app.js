@@ -31,6 +31,7 @@ const ENDPOINTS = {
   voiceSocket: "/ws/voice",
   jammerRobotNetwork: "/api/jammer/robot_network",
   jammerScan: "/api/jammer/scan",
+  jammerDiscoverClients: "/api/jammer/discover_clients",
   jammerStart: "/api/jammer/start",
   jammerStop: "/api/jammer/stop",
   jammerStatus: "/api/jammer/status",
@@ -1825,11 +1826,20 @@ class WiFiJammerController {
       targetChannelInput: $("#target-channel-input"),
       attackModeRadios: $$('input[name="attack-mode"]'),
       targetedSection: $("#targeted-input-section"),
+      clientSection: $("#client-input-section"),
+      clientNetworkSelect: $("#client-network-select"),
+      discoverClientsBtn: $("#discover-clients-btn"),
+      clientList: $("#client-list"),
+      selectAllClientsBtn: $("#select-all-clients-btn"),
+      deselectAllClientsBtn: $("#deselect-all-clients-btn"),
+      selectExceptRobotClientBtn: $("#select-except-robot-client-btn"),
     };
 
     this.networks = [];
     this.selectedNetworks = new Set();
+    this.selectedClients = new Set();
     this.robotNetworkBssid = null;
+    this.robotMac = null;
     this.isAttacking = false;
     this.statusInterval = null;
     this.pendingAttackConfig = null;
@@ -1846,6 +1856,12 @@ class WiFiJammerController {
     this.dom.selectAllBtn.addEventListener("click", () => this.selectAllNetworks());
     this.dom.deselectAllBtn.addEventListener("click", () => this.deselectAllNetworks());
     this.dom.selectExceptRobotBtn.addEventListener("click", () => this.selectAllExceptRobot());
+
+    // Client discovery controls
+    this.dom.discoverClientsBtn.addEventListener("click", () => this.discoverClients());
+    this.dom.selectAllClientsBtn.addEventListener("click", () => this.selectAllClients());
+    this.dom.deselectAllClientsBtn.addEventListener("click", () => this.deselectAllClients());
+    this.dom.selectExceptRobotClientBtn.addEventListener("click", () => this.selectAllClientsExceptRobot());
 
     // Attack controls
     this.dom.startAttackBtn.addEventListener("click", () => this.showLegalWarning());
@@ -1915,10 +1931,13 @@ class WiFiJammerController {
 
       if (data.bssid) {
         this.robotNetworkBssid = data.bssid;
+        this.robotMac = data.mac || null;
         const essid = data.essid || "Unknown";
         this.dom.robotNetworkDisplay.textContent = `${essid} (${data.bssid})`;
         this.dom.robotNetworkDisplay.style.color = "var(--ok)";
       } else {
+        this.robotNetworkBssid = null;
+        this.robotMac = null;
         this.dom.robotNetworkDisplay.textContent = "Not connected";
         this.dom.robotNetworkDisplay.style.color = "var(--muted)";
       }
@@ -2014,15 +2033,144 @@ class WiFiJammerController {
 
     if (selectedMode === 'targeted') {
       this.dom.targetedSection.classList.remove('hidden');
+      this.dom.clientSection.classList.add('hidden');
+    } else if (selectedMode === 'client') {
+      this.dom.targetedSection.classList.add('hidden');
+      this.dom.clientSection.classList.remove('hidden');
+      this.populateClientNetworkSelect();
     } else {
       this.dom.targetedSection.classList.add('hidden');
+      this.dom.clientSection.classList.add('hidden');
     }
+  }
+
+  populateClientNetworkSelect() {
+    // Populate the network select dropdown with discovered networks
+    this.dom.clientNetworkSelect.innerHTML = '<option value="">-- Select a network first --</option>';
+
+    this.networks.forEach(network => {
+      const option = document.createElement('option');
+      option.value = network.bssid;
+      option.textContent = `${network.essid || '(Hidden)'} (${network.bssid})`;
+      option.dataset.channel = network.channel;
+      this.dom.clientNetworkSelect.appendChild(option);
+    });
+  }
+
+  async discoverClients() {
+    const selectedBssid = this.dom.clientNetworkSelect.value;
+    const selectedOption = this.dom.clientNetworkSelect.selectedOptions[0];
+
+    if (!selectedBssid) {
+      alert('Please select a network first.');
+      return;
+    }
+
+    const channel = selectedOption ? parseInt(selectedOption.dataset.channel) : null;
+
+    try {
+      this.dom.discoverClientsBtn.disabled = true;
+      this.dom.discoverClientsBtn.textContent = 'Discovering...';
+      this.dom.clientList.innerHTML = '<div class="network-placeholder">Discovering clients...</div>';
+
+      const response = await fetch(`${ENDPOINTS.jammerDiscoverClients}?bssid=${selectedBssid}&channel=${channel || ''}`);
+      const data = await response.json();
+
+      if (data.clients && Array.isArray(data.clients)) {
+        this.renderClientList(data.clients);
+      } else {
+        this.dom.clientList.innerHTML = '<div class="network-placeholder">No clients found</div>';
+      }
+
+    } catch (error) {
+      console.error('Client discovery failed:', error);
+      this.dom.clientList.innerHTML = '<div class="network-placeholder">Discovery failed. Please try again.</div>';
+    } finally {
+      this.dom.discoverClientsBtn.disabled = false;
+      this.dom.discoverClientsBtn.textContent = 'Discover Clients';
+    }
+  }
+
+  renderClientList(clients) {
+    if (clients.length === 0) {
+      this.dom.clientList.innerHTML = '<div class="network-placeholder">No clients found on this network</div>';
+      return;
+    }
+
+    this.dom.clientList.innerHTML = clients.map(client => {
+      const isRobotDevice = client.is_robot_device || client.mac === this.robotMac;
+      const isSelected = this.selectedClients.has(client.mac);
+
+      return `
+        <div class="client-item ${isRobotDevice ? 'robot-device' : ''}" data-mac="${client.mac}">
+          <input
+            type="checkbox"
+            class="client-checkbox"
+            data-mac="${client.mac}"
+            ${isSelected ? 'checked' : ''}
+            ${isRobotDevice ? 'disabled' : ''}
+          />
+          <div class="client-info">
+            <div class="client-mac">
+              ${client.mac}
+              ${isRobotDevice ? '<span class="client-badge robot">🛡️ Robot Device</span>' : ''}
+            </div>
+            <div class="client-details">
+              <span>Signal: ${client.signal_strength} dBm</span>
+            </div>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    // Bind checkbox events
+    this.dom.clientList.querySelectorAll('.client-checkbox').forEach(checkbox => {
+      checkbox.addEventListener('change', (e) => {
+        const mac = e.target.dataset.mac;
+        if (e.target.checked) {
+          this.selectedClients.add(mac);
+        } else {
+          this.selectedClients.delete(mac);
+        }
+      });
+    });
+  }
+
+  selectAllClients() {
+    this.dom.clientList.querySelectorAll('.client-checkbox').forEach(checkbox => {
+      if (!checkbox.disabled) {
+        checkbox.checked = true;
+        const mac = checkbox.dataset.mac;
+        this.selectedClients.add(mac);
+      }
+    });
+  }
+
+  deselectAllClients() {
+    this.selectedClients.clear();
+    this.dom.clientList.querySelectorAll('.client-checkbox').forEach(checkbox => {
+      checkbox.checked = false;
+    });
+  }
+
+  selectAllClientsExceptRobot() {
+    this.selectedClients.clear();
+    this.dom.clientList.querySelectorAll('.client-checkbox').forEach(checkbox => {
+      if (!checkbox.disabled) {
+        checkbox.checked = true;
+        const mac = checkbox.dataset.mac;
+        this.selectedClients.add(mac);
+      } else {
+        checkbox.checked = false;
+      }
+    });
   }
 
   showLegalWarning() {
     // Prepare attack configuration
     const selectedMode = document.querySelector('input[name="attack-mode"]:checked').value;
     let targetBssids = [];
+    let targetMacs = [];
     let channel = null;
 
     if (selectedMode === 'mass') {
@@ -2031,7 +2179,7 @@ class WiFiJammerController {
         return;
       }
       targetBssids = Array.from(this.selectedNetworks);
-    } else {
+    } else if (selectedMode === 'targeted') {
       const bssid = this.dom.targetBssidInput.value.trim();
       if (!bssid) {
         alert('Please enter a target BSSID.');
@@ -2043,17 +2191,41 @@ class WiFiJammerController {
       }
       targetBssids = [bssid];
       channel = this.dom.targetChannelInput.value ? parseInt(this.dom.targetChannelInput.value) : null;
+    } else if (selectedMode === 'client') {
+      const selectedBssid = this.dom.clientNetworkSelect.value;
+      const selectedOption = this.dom.clientNetworkSelect.selectedOptions[0];
+
+      if (!selectedBssid) {
+        alert('Please select a network first.');
+        return;
+      }
+
+      if (this.selectedClients.size === 0) {
+        alert('Please select at least one client device to attack.');
+        return;
+      }
+
+      targetBssids = [selectedBssid];
+      targetMacs = Array.from(this.selectedClients);
+      channel = selectedOption ? parseInt(selectedOption.dataset.channel) : null;
     }
 
-    // Check if trying to attack robot's own network
-    if (this.robotNetworkBssid && targetBssids.includes(this.robotNetworkBssid)) {
+    // Check if trying to attack robot's own network (for mass and targeted modes)
+    if (this.robotNetworkBssid && targetBssids.includes(this.robotNetworkBssid) && selectedMode !== 'client') {
       alert('Cannot attack the robot\'s own network!');
+      return;
+    }
+
+    // Check if trying to attack robot's own device (for client mode)
+    if (selectedMode === 'client' && this.robotMac && targetMacs.includes(this.robotMac)) {
+      alert('Cannot attack the robot\'s own device!');
       return;
     }
 
     this.pendingAttackConfig = {
       mode: selectedMode,
       target_bssids: targetBssids,
+      target_macs: targetMacs,
       channel: channel,
       pps: parseInt(this.dom.packetRateSlider.value),
       duration: parseInt(this.dom.durationSlider.value),

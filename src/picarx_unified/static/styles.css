@@ -1327,6 +1327,95 @@ select:focus {
   font-size: 12px;
 }
 
+.client-list {
+  max-height: 200px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-soft);
+  margin-top: 12px;
+}
+
+.client-item {
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  transition: background var(--transition);
+}
+
+.client-item:last-child {
+  border-bottom: none;
+}
+
+.client-item:hover {
+  background: var(--surface-soft);
+}
+
+.client-item.robot-device {
+  background: var(--ok-soft);
+  border-left: 3px solid var(--ok);
+}
+
+.client-checkbox {
+  margin-right: 12px;
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+}
+
+.client-checkbox:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.client-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.client-mac {
+  font-weight: 600;
+  color: var(--text);
+  font-size: 12px;
+  margin-bottom: 2px;
+  font-family: var(--font-mono);
+}
+
+.client-details {
+  display: flex;
+  gap: 12px;
+  font-size: 11px;
+  color: var(--text-soft);
+}
+
+.client-badge {
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.client-badge.robot {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+.client-controls {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+
+.network-placeholder {
+  padding: 20px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .network-item {
   display: flex;
   align-items: center;
