@@ -194,6 +194,10 @@ class WifiJammer:
         except Exception:
             return False
 
+    def _check_scapy(self) -> bool:
+        """Check if Scapy is available"""
+        return SCAPY_AVAILABLE
+
     def _update_status(self, **kwargs) -> None:
         """Thread-safe status update"""
         with self._status_lock:
@@ -897,82 +901,99 @@ class WifiJammer:
         Returns:
             Status dictionary
         """
-        # Validate inputs
-        if mode not in [m.value for m in JammerMode]:
-            return {"status": "error", "message": f"Invalid mode: {mode}"}
+        try:
+            # Validate inputs
+            if mode not in [m.value for m in JammerMode]:
+                return {"status": "error", "message": f"Invalid mode: {mode}"}
 
-        mode_enum = JammerMode(mode)
+            mode_enum = JammerMode(mode)
 
-        # Validate packet rate
-        packet_rate = max(10, min(packet_rate, self._max_packet_rate))
+            # Validate packet rate
+            packet_rate = max(10, min(packet_rate, self._max_packet_rate))
 
-        # Validate targets based on mode
-        if mode_enum == JammerMode.CLIENT:
-            if not target_macs:
-                return {"status": "error", "message": "No target MACs provided for client mode"}
-            # For client mode, we need the BSSID of the network they're on
-            if not target_bssids:
-                return {"status": "error", "message": "Network BSSID required for client mode"}
-        else:
-            if not target_bssids:
-                return {"status": "error", "message": "No target BSSIDs provided"}
+            # Validate targets based on mode
+            if mode_enum == JammerMode.CLIENT:
+                if not target_macs or len(target_macs) == 0:
+                    return {"status": "error", "message": "No target MACs provided for client mode"}
+                # Validate MAC address format
+                for mac in target_macs:
+                    if not re.match(r'^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$', mac):
+                        return {"status": "error", "message": f"Invalid MAC address format: {mac}"}
+                # For client mode, we need the BSSID of the network they're on
+                if not target_bssids or len(target_bssids) == 0:
+                    return {"status": "error", "message": "Network BSSID required for client mode"}
+                # Validate BSSID format
+                for bssid in target_bssids:
+                    if not re.match(r'^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$', bssid):
+                        return {"status": "error", "message": f"Invalid BSSID format: {bssid}"}
+            else:
+                if not target_bssids or len(target_bssids) == 0:
+                    return {"status": "error", "message": "No target BSSIDs provided"}
+                # Validate BSSID format
+                for bssid in target_bssids:
+                    if not re.match(r'^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$', bssid):
+                        return {"status": "error", "message": f"Invalid BSSID format: {bssid}"}
 
-        # Check if already running
-        if self._status.state == JammerState.RUNNING:
-            return {"status": "error", "message": "Attack already running"}
+            # Check if already running
+            if self._status.state == JammerState.RUNNING:
+                return {"status": "error", "message": "Attack already running"}
 
-        # Detect and protect robot network
-        self._detect_robot_network()
+            # Detect and protect robot network
+            self._detect_robot_network()
 
-        # Validate that robot network is not in targets
-        if self._robot_network_bssid and self._robot_network_bssid in target_bssids:
+            # Validate that robot network is not in targets
+            if self._robot_network_bssid and self._robot_network_bssid in target_bssids:
+                return {
+                    "status": "error",
+                    "message": f"Cannot attack robot's own network ({self._robot_network_bssid})"
+                }
+
+            # Validate that robot MAC is not in client targets
+            if target_macs and self._robot_mac and self._robot_mac in target_macs:
+                return {
+                    "status": "error",
+                    "message": f"Cannot attack robot's own device ({self._robot_mac})"
+                }
+
+            # Set monitor mode
+            if not self._set_monitor_mode():
+                return {"status": "error", "message": "Failed to set monitor mode"}
+
+            # Prepare attack
+            self._stop_event.clear()
+            self._update_status(
+                state=JammerState.RUNNING,
+                mode=mode_enum,
+                target_bssid=target_bssids[0] if len(target_bssids) == 1 else None,
+                target_macs=target_macs or [],
+                channel=channel,
+                packets_sent=0,
+                start_time=time.time(),
+                error_message=""
+            )
+
+            # Start jamming thread
+            self._jammer_thread = threading.Thread(
+                target=self._jamming_loop,
+                args=(mode_enum, target_bssids, target_macs, channel, packet_rate, duration),
+                daemon=True,
+                name="wifi-jammer"
+            )
+            self._jammer_thread.start()
+
+            logger.info(f"Attack started - Mode: {mode}, BSSIDs: {len(target_bssids or [])}, MACs: {len(target_macs or [])}")
             return {
-                "status": "error",
-                "message": f"Cannot attack robot's own network ({self._robot_network_bssid})"
+                "status": "started",
+                "mode": mode,
+                "targets": target_bssids or [],
+                "target_macs": target_macs or [],
+                "packet_rate": packet_rate,
+                "duration": duration
             }
 
-        # Validate that robot MAC is not in client targets
-        if target_macs and self._robot_mac and self._robot_mac in target_macs:
-            return {
-                "status": "error",
-                "message": f"Cannot attack robot's own device ({self._robot_mac})"
-            }
-
-        # Set monitor mode
-        if not self._set_monitor_mode():
-            return {"status": "error", "message": "Failed to set monitor mode"}
-
-        # Prepare attack
-        self._stop_event.clear()
-        self._update_status(
-            state=JammerState.RUNNING,
-            mode=mode_enum,
-            target_bssid=target_bssids[0] if len(target_bssids) == 1 else None,
-            target_macs=target_macs or [],
-            channel=channel,
-            packets_sent=0,
-            start_time=time.time(),
-            error_message=""
-        )
-
-        # Start jamming thread
-        self._jammer_thread = threading.Thread(
-            target=self._jamming_loop,
-            args=(mode_enum, target_bssids, target_macs, channel, packet_rate, duration),
-            daemon=True,
-            name="wifi-jammer"
-        )
-        self._jammer_thread.start()
-
-        logger.info(f"Attack started - Mode: {mode}, BSSIDs: {len(target_bssids or [])}, MACs: {len(target_macs or [])}")
-        return {
-            "status": "started",
-            "mode": mode,
-            "targets": target_bssids or [],
-            "target_macs": target_macs or [],
-            "packet_rate": packet_rate,
-            "duration": duration
-        }
+        except Exception as e:
+            logger.error(f"Error starting attack: {e}", exc_info=True)
+            return {"status": "error", "message": str(e)}
 
     def stop_attack(self) -> dict:
         """

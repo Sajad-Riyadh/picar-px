@@ -219,6 +219,11 @@ def create_app() -> FastAPI:
             pps = body.get("pps", 100)
             duration = body.get("duration")
 
+            # Log the request for debugging
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(f"Jammer start request - Mode: {mode}, BSSIDs: {target_bssids}, MACs: {target_macs}, Channel: {channel}, PPS: {pps}")
+
             # Validate mode
             if mode not in ["mass", "targeted", "client"]:
                 raise HTTPException(status_code=400, detail="Invalid mode. Use 'mass', 'targeted', or 'client'")
@@ -243,14 +248,19 @@ def create_app() -> FastAPI:
                 duration=duration
             )
 
+            logger.info(f"Jammer start result: {result}")
+
             if result.get("status") == "error":
-                raise HTTPException(status_code=400, detail=result.get("message"))
+                raise HTTPException(status_code=400, detail=result.get("message", "Unknown error"))
 
             return result
 
         except HTTPException:
             raise
         except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Jammer start error: {e}", exc_info=True)
             raise HTTPException(status_code=500, detail=str(e))
 
     @app.post("/api/jammer/stop")
@@ -267,6 +277,45 @@ def create_app() -> FastAPI:
         try:
             return request.app.state.wifi_jammer.get_status()
         except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @app.get("/api/jammer/test")
+    async def jammer_test(request: Request):
+        """Test WiFi jammer configuration"""
+        try:
+            jammer = request.app.state.wifi_jammer
+
+            # Check if aircrack-ng is available
+            import subprocess
+            aircrack_available = False
+            try:
+                result = subprocess.run(["which", "airodump-ng"], capture_output=True, text=True, timeout=2)
+                aircrack_available = result.returncode == 0
+            except:
+                pass
+
+            # Check if Scapy is available
+            scapy_available = jammer._check_scapy() if hasattr(jammer, '_check_scapy') else False
+
+            # Get robot network info
+            robot_network = jammer.get_robot_network()
+
+            # Check monitor interface
+            monitor_interface = jammer.monitor_interface
+            management_interface = jammer.management_interface
+
+            return {
+                "status": "ok",
+                "aircrack_available": aircrack_available,
+                "scapy_available": scapy_available,
+                "monitor_interface": monitor_interface,
+                "management_interface": management_interface,
+                "robot_network": robot_network
+            }
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Jammer test error: {e}", exc_info=True)
             raise HTTPException(status_code=500, detail=str(e))
 
     return app

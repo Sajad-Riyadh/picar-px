@@ -2173,6 +2173,12 @@ class WiFiJammerController {
     let targetMacs = [];
     let channel = null;
 
+    console.log('showLegalWarning - Selected mode:', selectedMode);
+    console.log('showLegalWarning - Selected networks:', this.selectedNetworks);
+    console.log('showLegalWarning - Selected clients:', this.selectedClients);
+    console.log('showLegalWarning - Robot MAC:', this.robotMac);
+    console.log('showLegalWarning - Robot network BSSID:', this.robotNetworkBssid);
+
     if (selectedMode === 'mass') {
       if (this.selectedNetworks.size === 0) {
         alert('Please select at least one network to attack.');
@@ -2194,6 +2200,10 @@ class WiFiJammerController {
     } else if (selectedMode === 'client') {
       const selectedBssid = this.dom.clientNetworkSelect.value;
       const selectedOption = this.dom.clientNetworkSelect.selectedOptions[0];
+
+      console.log('Client mode - Selected BSSID:', selectedBssid);
+      console.log('Client mode - Selected clients size:', this.selectedClients.size);
+      console.log('Client mode - Selected clients:', Array.from(this.selectedClients));
 
       if (!selectedBssid) {
         alert('Please select a network first.');
@@ -2231,6 +2241,8 @@ class WiFiJammerController {
       duration: parseInt(this.dom.durationSlider.value),
     };
 
+    console.log('Pending attack config:', this.pendingAttackConfig);
+
     this.dom.legalModal.hidden = false;
   }
 
@@ -2245,6 +2257,8 @@ class WiFiJammerController {
     }
 
     try {
+      console.log('Starting attack with config:', this.pendingAttackConfig);
+
       const response = await fetch(ENDPOINTS.jammerStart, {
         method: 'POST',
         headers: {
@@ -2253,14 +2267,21 @@ class WiFiJammerController {
         body: JSON.stringify(this.pendingAttackConfig),
       });
 
+      console.log('Response status:', response.status);
+      console.log('Response ok:', response.ok);
+
       const result = await response.json();
+
+      console.log('Response result:', result);
 
       if (result.status === 'started') {
         this.isAttacking = true;
         this.updateAttackUI(true);
         this.hideLegalWarning();
       } else {
-        alert(`Failed to start attack: ${result.message || 'Unknown error'}`);
+        const errorMessage = result.message || result.detail || 'Unknown error';
+        console.error('Attack failed with error:', errorMessage);
+        alert(`Failed to start attack: ${errorMessage}`);
       }
     } catch (error) {
       console.error('Failed to start attack:', error);
