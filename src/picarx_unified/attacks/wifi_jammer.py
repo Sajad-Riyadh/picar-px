@@ -312,6 +312,9 @@ class WifiJammer:
         temp_file = f"/tmp/airodump_clients_{uuid.uuid4().hex[:8]}"
 
         try:
+            # airodump-ng needs monitor mode for passive station discovery.
+            self._set_monitor_mode()
+
             # Set channel for client discovery
             self._set_channel(channel)
 
@@ -442,6 +445,8 @@ class WifiJammer:
             logger.error(f"Client discovery failed: {e}")
             self._update_status(state=JammerState.ERROR, error_message=str(e))
             return []
+        finally:
+            self._set_managed_mode()
 
     def _set_monitor_mode(self) -> bool:
         """Set the WiFi interface to monitor mode"""
