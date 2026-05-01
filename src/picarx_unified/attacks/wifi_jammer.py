@@ -657,6 +657,20 @@ class WifiJammer:
                 except Exception as e:
                     logger.debug(f"Error cleaning up temp files: {e}")
 
+            if not networks:
+                logger.info("airodump-ng scan found no networks; falling back to iw scan")
+                self._set_managed_mode()
+                result = subprocess.run(
+                    ["sudo", "iw", "dev", self.monitor_interface, "scan"],
+                    capture_output=True,
+                    text=True,
+                    timeout=duration + 5
+                )
+                if result.returncode != 0:
+                    logger.warning("iw scan fallback failed: %s", (result.stderr or "").strip())
+                else:
+                    networks = self._parse_scan_results(result.stdout)
+
             with self._scan_lock:
                 self._scan_results = networks
 
@@ -681,6 +695,8 @@ class WifiJammer:
             logger.error(f"Network scan failed: {e}")
             self._update_status(state=JammerState.ERROR, error_message=str(e))
             return []
+        finally:
+            self._set_managed_mode()
 
     def _parse_scan_results(self, scan_output: str) -> List[NetworkInfo]:
         """Parse iw scan output into NetworkInfo objects"""
