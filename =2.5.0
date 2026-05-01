@@ -1,0 +1,5 @@
+Collecting scapy
+  Using cached scapy-2.7.0-py3-none-any.whl.metadata (5.8 kB)
+Using cached scapy-2.7.0-py3-none-any.whl (2.6 MB)
+Installing collected packages: scapy
+Successfully installed scapy-2.7.0

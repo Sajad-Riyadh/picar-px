@@ -8,14 +8,11 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request, WebSocket
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 from .config import AppConfig
-from .models import AudioTargetRequest, CameraRequest, DriveRequest, ModeRequest, SettingsUpdateRequest, VisionQuestionRequest
+from .models import AudioTargetRequest, CameraRequest, DriveRequest, ModeRequest, SettingsUpdateRequest, VisionQuestionRequest, WifiJammerRequest
 from .runtime import RobotRuntime
 from .safety import SafetyViolation
 from .voice import VoiceConnection
-from .models import (
-    # ... your existing models ...
-    WifiJammerRequest,          # ← ADD THIS LINE
-)
+from .attacks.wifi_jammer import WifiJammer
 
 def _authorize(request: Request, authorization: Annotated[str | None, Header()] = None) -> None:
     token = request.app.state.runtime.config.api_token
@@ -41,13 +38,16 @@ def _is_static_path_allowed(static_root, target) -> bool:
 def create_app() -> FastAPI:
     config = AppConfig.from_env()
     runtime = RobotRuntime(config)
+    wifi_jammer = WifiJammer(monitor_interface="wlan1")
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         runtime.start(asyncio.get_running_loop())
         app.state.runtime = runtime
+        app.state.wifi_jammer = wifi_jammer
         yield
         runtime.stop()
+        wifi_jammer.stop()
 
     app = FastAPI(title="PiCar-X Unified", lifespan=lifespan)
 
@@ -174,33 +174,37 @@ def create_app() -> FastAPI:
         connection = VoiceConnection(websocket.app.state.runtime, websocket)
         await connection.run()
 
-            # ====================== WiFi Deauth Jammer Endpoints ======================
-    @app.get("/api/jammer/scan")
-    async def scan_networks(request: Request):
-        """Scan nearby WiFi networks (safe - protects your SSH)"""
-        runtime = _get_runtime(request)
-        return runtime.scan_networks()
+    # WiFi Jammer endpoints
+    @app.get("/api/wifi/scan")
+    async def wifi_scan(request: Request, _: None = Depends(_authorize)):
+        """Scan for nearby WiFi networks"""
+        return {"networks": request.app.state.wifi_jammer.scan_networks()}
 
-    @app.post("/api/jammer/start")
-    async def start_jammer(
-        body: WifiJammerRequest,
+    @app.post("/api/wifi/jammer/start")
+    async def wifi_jammer_start(
         request: Request,
+        body: WifiJammerRequest,
         _: None = Depends(_authorize),
     ):
-        """Start WiFi deauthentication attack"""
-        runtime = _get_runtime(request)
-        return runtime.start_wifi_jammer(body.model_dump(exclude_unset=True))
+        """Start WiFi jammer in mass or targeted mode"""
+        jammer = request.app.state.wifi_jammer
+        result = jammer.start(
+            mode=body.mode,
+            bssid=body.bssid,
+            channel=body.channel,
+            packet_rate=body.packet_rate,
+            duration=body.duration
+        )
+        return result
 
-    @app.post("/api/jammer/stop")
-    async def stop_jammer(request: Request, _: None = Depends(_authorize)):
-        """Stop WiFi deauthentication attack"""
-        runtime = _get_runtime(request)
-        return runtime.stop_wifi_jammer()
+    @app.post("/api/wifi/jammer/stop")
+    async def wifi_jammer_stop(request: Request, _: None = Depends(_authorize)):
+        """Stop WiFi jammer"""
+        return request.app.state.wifi_jammer.stop()
 
-    @app.get("/api/jammer/status")
-    async def get_jammer_status(request: Request):
-        """Get current jammer status"""
-        runtime = _get_runtime(request)
-        return runtime.get_jammer_status()
+    @app.get("/api/wifi/jammer/status")
+    async def wifi_jammer_status(request: Request):
+        """Get WiFi jammer status"""
+        return request.app.state.wifi_jammer.get_status()
 
     return app

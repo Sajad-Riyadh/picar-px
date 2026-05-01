@@ -35,14 +35,6 @@ from .vision import VisionService
 
 logger = logging.getLogger(__name__)
 
-try:
-    from .attacks.wifi_jammer import WifiJammer
-except ModuleNotFoundError as exc:
-    if exc.name not in {"scapy", "picarx_unified.attacks", "picarx_unified.attacks.wifi_jammer"}:
-        raise
-    WifiJammer = None
-
-
 def _is_expected_websocket_disconnect(exc: BaseException) -> bool:
     current: BaseException | None = exc
     while current is not None:
@@ -53,32 +45,6 @@ def _is_expected_websocket_disconnect(exc: BaseException) -> bool:
             return True
         current = current.__cause__ or current.__context__
     return False
-
-
-class UnavailableWifiJammer:
-    def scan_networks(self) -> list:
-        return []
-
-    def start(self, **_config) -> dict:
-        return {
-            "status": "unavailable",
-            "message": "WiFi tooling is not installed in this environment.",
-        }
-
-    def stop(self) -> dict:
-        return {"status": "stopped", "packets_sent": 0}
-
-    def get_status(self) -> dict:
-        return {
-            "running": False,
-            "mode": None,
-            "target_bssid": None,
-            "channel": None,
-            "packets_sent": 0,
-            "uptime_seconds": 0,
-            "own_channel": None,
-            "available": False,
-        }
 
 
 class RobotRuntime:
@@ -123,8 +89,6 @@ class RobotRuntime:
             stop_autonomous_drive=self.stop_autonomous_drive,
         )
 
-        self.jammer = WifiJammer(monitor_interface="wlan1") if WifiJammer is not None else UnavailableWifiJammer()
-
     def start(self, loop: asyncio.AbstractEventLoop) -> None:
         if self._running:
             return
@@ -149,23 +113,6 @@ class RobotRuntime:
         self.store.update(self._refresh_session_metadata)
         if self._watchdog_thread and self._watchdog_thread.is_alive():
             self._watchdog_thread.join(timeout=1.0)
-
-    # ====================== WiFi Deauth Jammer (Educational) ======================
-    def scan_networks(self):
-        """Scan nearby networks for the web UI (safe - protects wlan0)"""
-        return self.jammer.scan_networks()
-
-    def start_wifi_jammer(self, config: dict):
-        """Start the deauthentication attack"""
-        return self.jammer.start(**config)
-
-    def stop_wifi_jammer(self):
-        """Stop the deauthentication attack"""
-        return self.jammer.stop()
-
-    def get_jammer_status(self):
-        """Return current jammer status for the web UI"""
-        return self.jammer.get_status()
 
     def current_session(self) -> RobotSession:
         return self._prepare_session(self.store.load())
