@@ -20,9 +20,11 @@ Technical Implementation:
 
 import logging
 import os
+import re
 import subprocess
 import threading
 import time
+import uuid
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Dict, List, Optional, Tuple
@@ -145,6 +147,11 @@ class WifiJammer:
         if not SCAPY_AVAILABLE:
             raise RuntimeError("Scapy is required but not installed. Install with: pip install scapy")
 
+        # Check if aircrack-ng is available
+        if not self._check_aircrack_ng():
+            logger.warning("Aircrack-ng suite not found. Network scanning and client discovery may not work properly.")
+            logger.warning("Install with: sudo apt-get install aircrack-ng")
+
         self.monitor_interface = monitor_interface
         self.management_interface = management_interface
 
@@ -173,6 +180,19 @@ class WifiJammer:
         self._scan_lock = threading.Lock()
 
         logger.info(f"WiFi Jammer initialized - Monitor: {monitor_interface}, Management: {management_interface}")
+
+    def _check_aircrack_ng(self) -> bool:
+        """Check if aircrack-ng suite is installed"""
+        try:
+            result = subprocess.run(
+                ["which", "airodump-ng"],
+                capture_output=True,
+                text=True,
+                timeout=2
+            )
+            return result.returncode == 0
+        except Exception:
+            return False
 
     def _update_status(self, **kwargs) -> None:
         """Thread-safe status update"""
@@ -283,83 +303,104 @@ class WifiJammer:
             logger.error(f"Error detecting robot network: {e}")
 
     def _discover_clients(self, bssid: str, channel: int) -> List[ClientInfo]:
-        """Discover clients connected to a specific access point"""
+        """Discover clients connected to a specific access point using airodump-ng"""
         clients = []
+        temp_file = f"/tmp/airodump_clients_{uuid.uuid4().hex[:8]}"
 
         try:
             # Set channel for client discovery
             self._set_channel(channel)
 
-            logger.debug(f"Discovering clients for AP {bssid} on channel {channel}")
+            logger.debug(f"Discovering clients for AP {bssid} on channel {channel} using airodump-ng")
 
-            # Try to use airodump-ng if available for client discovery
+            # Use airodump-ng to discover clients
+            # Run for 10 seconds to capture client information
+            cmd = [
+                "sudo", "airodump-ng",
+                "--bssid", bssid,
+                "-c", str(channel),
+                "--output-format", "csv",
+                "-w", temp_file,
+                self.monitor_interface
+            ]
+
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+
+            # Let it run for 10 seconds to capture clients
             try:
-                # Use airodump-ng to discover clients
-                # This requires airodump-ng to be installed
-                result = subprocess.run(
-                    ["sudo", "airodump-ng", "--bssid", bssid, "-c", str(channel), "--output-format", "csv", "-w", "/tmp/clients", self.monitor_interface],
-                    capture_output=True,
-                    text=True,
-                    timeout=15
-                )
+                process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                process.terminate()
+                try:
+                    process.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    process.kill()
 
-                # Parse the CSV output for client information
-                # This is a simplified version - in production you'd want more robust parsing
-                csv_file = "/tmp/clients-01.csv"
-                if os.path.exists(csv_file):
+            # Parse the CSV output for client information
+            csv_file = f"{temp_file}-01.csv"
+            if os.path.exists(csv_file):
+                try:
                     with open(csv_file, 'r') as f:
-                        for line in f:
-                            if line.startswith("Station MAC"):
-                                continue  # Skip header
-                            parts = line.strip().split(',')
-                            if len(parts) >= 6:
+                        lines = f.readlines()
+
+                    # Find the station section (starts with "Station MAC")
+                    station_section = False
+                    for line in lines:
+                        line = line.strip()
+                        if line.startswith("Station MAC"):
+                            station_section = True
+                            continue
+
+                        if station_section:
+                            if not line:  # Empty line marks end of section
+                                break
+
+                            parts = line.split(',')
+                            if len(parts) >= 1:
                                 mac = parts[0].strip().upper()
-                                if mac and mac != "Not-Associated":
-                                    # Check if this is the robot's MAC
-                                    is_robot = mac == self._robot_mac
-                                    clients.append(ClientInfo(
-                                        mac=mac,
-                                        bssid=bssid,
-                                        signal_strength=int(parts[2]) if parts[2].isdigit() else 0,
-                                        is_robot_device=is_robot
-                                    ))
+                                # Filter out invalid MACs and the BSSID itself
+                                if mac and mac != "Not-Associated" and mac != bssid:
+                                    # Validate MAC format
+                                    if re.match(r'^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$', mac):
+                                        # Check if this is the robot's MAC
+                                        is_robot = mac == self._robot_mac
+                                        # Get signal strength if available
+                                        signal = 0
+                                        if len(parts) >= 6:
+                                            try:
+                                                signal = int(parts[5].strip())
+                                            except (ValueError, IndexError):
+                                                pass
 
-                    # Clean up temporary files
-                    try:
-                        os.remove(csv_file)
-                    except:
-                        pass
+                                        clients.append(ClientInfo(
+                                            mac=mac,
+                                            bssid=bssid,
+                                            signal_strength=signal,
+                                            is_robot_device=is_robot
+                                        ))
 
-            except FileNotFoundError:
-                logger.debug("airodump-ng not available, using alternative method")
+                except Exception as e:
+                    logger.error(f"Error parsing airodump-ng output: {e}")
 
-            # Alternative: Use iw station dump if we're connected to the network
-            # This only works for networks we're connected to
-            try:
-                result = subprocess.run(
-                    ["iw", "dev", self.management_interface, "station", "dump"],
-                    capture_output=True,
-                    text=True,
-                    timeout=5
-                )
+                # Clean up temporary files
+                try:
+                    for ext in ['-01.csv', '-01.cap', '-01.kismet.csv', '-01.kismet.netxml']:
+                        temp_path = f"{temp_file}{ext}"
+                        if os.path.exists(temp_path):
+                            os.remove(temp_path)
+                except Exception as e:
+                    logger.debug(f"Error cleaning up temp files: {e}")
 
-                current_bssid = None
-                for line in result.stdout.splitlines():
-                    if "Connected to" in line:
-                        current_bssid = line.split("Connected to")[1].split()[0].strip().upper()
-                    elif "Station" in line:
-                        mac = line.split("Station")[1].split()[0].strip().upper()
-                        if current_bssid == bssid:
-                            is_robot = mac == self._robot_mac
-                            clients.append(ClientInfo(
-                                mac=mac,
-                                bssid=bssid,
-                                is_robot_device=is_robot
-                            ))
+            logger.info(f"Discovered {len(clients)} clients for AP {bssid}")
 
-            except Exception as e:
-                logger.debug(f"Alternative client discovery failed: {e}")
-
+        except FileNotFoundError:
+            logger.error("airodump-ng not found. Please install aircrack-ng suite:")
+            logger.error("  sudo apt-get install aircrack-ng")
         except Exception as e:
             logger.error(f"Error discovering clients for {bssid}: {e}")
 
@@ -486,7 +527,7 @@ class WifiJammer:
 
     def scan_networks(self, duration: int = 10) -> List[dict]:
         """
-        Scan for nearby WiFi networks
+        Scan for nearby WiFi networks using airodump-ng
 
         Args:
             duration: Scan duration in seconds
@@ -502,19 +543,115 @@ class WifiJammer:
         self._detect_robot_network()
 
         try:
-            logger.info(f"Starting network scan on {self.monitor_interface}...")
+            logger.info(f"Starting network scan on {self.monitor_interface} using airodump-ng...")
 
-            self._set_managed_mode()
+            # Set monitor mode for scanning
+            self._set_monitor_mode()
 
-            # Use iw dev scan for passive scanning
-            result = subprocess.run(
-                ["sudo", "iw", "dev", self.monitor_interface, "scan"],
-                capture_output=True,
-                text=True,
-                timeout=duration + 5
+            # Use airodump-ng for comprehensive network scanning
+            temp_file = f"/tmp/airodump_scan_{uuid.uuid4().hex[:8]}"
+            cmd = [
+                "sudo", "airodump-ng",
+                "--output-format", "csv",
+                "-w", temp_file,
+                self.monitor_interface
+            ]
+
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
             )
 
-            networks = self._parse_scan_results(result.stdout)
+            # Let it run for the specified duration
+            try:
+                process.wait(timeout=duration)
+            except subprocess.TimeoutExpired:
+                process.terminate()
+                try:
+                    process.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+
+            # Parse the CSV output for network information
+            networks = []
+            csv_file = f"{temp_file}-01.csv"
+            if os.path.exists(csv_file):
+                try:
+                    with open(csv_file, 'r') as f:
+                        lines = f.readlines()
+
+                    # Find the AP section (before "Station MAC")
+                    for line in lines:
+                        line = line.strip()
+                        if line.startswith("Station MAC"):
+                            break  # End of AP section
+
+                        if line and not line.startswith("BSSID"):
+                            parts = line.split(',')
+                            if len(parts) >= 14:
+                                bssid = parts[0].strip().upper()
+                                # Validate BSSID format
+                                if re.match(r'^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$', bssid):
+                                    essid = parts[13].strip() if len(parts) > 13 else ""
+                                    if not essid:
+                                        essid = "(Hidden)"
+
+                                    # Get channel from frequency if available
+                                    channel = 1
+                                    if len(parts) > 3:
+                                        try:
+                                            freq = int(parts[3].strip())
+                                            # Convert frequency to channel (2.4 GHz)
+                                            if 2400 <= freq <= 2500:
+                                                channel = (freq - 2407) // 5
+                                            # 5 GHz channels
+                                            elif 5000 <= freq <= 6000:
+                                                channel = (freq - 5000) // 5
+                                        except (ValueError, IndexError):
+                                            pass
+
+                                    # Get signal strength
+                                    signal = -70
+                                    if len(parts) > 8:
+                                        try:
+                                            signal = int(parts[8].strip())
+                                        except (ValueError, IndexError):
+                                            pass
+
+                                    # Get encryption
+                                    encryption = "Open"
+                                    if len(parts) > 5:
+                                        enc = parts[5].strip().upper()
+                                        if "WPA" in enc:
+                                            encryption = "WPA2" if "WPA2" in enc else "WPA"
+                                        elif "WEP" in enc:
+                                            encryption = "WEP"
+
+                                    # Check if this is the robot's network
+                                    is_robot = bssid == self._robot_network_bssid
+
+                                    networks.append(NetworkInfo(
+                                        bssid=bssid,
+                                        essid=essid,
+                                        channel=channel,
+                                        signal_strength=signal,
+                                        encryption=encryption,
+                                        is_robot_network=is_robot
+                                    ))
+
+                except Exception as e:
+                    logger.error(f"Error parsing airodump-ng scan output: {e}")
+
+                # Clean up temporary files
+                try:
+                    for ext in ['-01.csv', '-01.cap', '-01.kismet.csv', '-01.kismet.netxml']:
+                        temp_path = f"{temp_file}{ext}"
+                        if os.path.exists(temp_path):
+                            os.remove(temp_path)
+                except Exception as e:
+                    logger.debug(f"Error cleaning up temp files: {e}")
 
             with self._scan_lock:
                 self._scan_results = networks
@@ -524,9 +661,14 @@ class WifiJammer:
                 networks_discovered=len(networks)
             )
 
-            logger.info(f"Scan complete - Found {len(networks)} networks")
+            logger.info(f"Scan complete - Found {len(networks)} networks using airodump-ng")
             return [net.to_dict() for net in networks]
 
+        except FileNotFoundError:
+            logger.error("airodump-ng not found. Please install aircrack-ng:")
+            logger.error("  sudo apt-get install aircrack-ng")
+            self._update_status(state=JammerState.ERROR, error_message="airodump-ng not found")
+            return []
         except subprocess.TimeoutExpired:
             logger.error("Network scan timeout")
             self._update_status(state=JammerState.ERROR, error_message="Scan timeout")

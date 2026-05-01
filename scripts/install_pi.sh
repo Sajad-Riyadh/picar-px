@@ -144,7 +144,8 @@ install_system_packages() {
     rpicam-apps-lite \
     espeak-ng \
     alsa-utils \
-    avahi-daemon
+    avahi-daemon \
+    aircrack-ng
 
   if command -v systemctl >/dev/null 2>&1; then
     run_root systemctl enable --now avahi-daemon || true
