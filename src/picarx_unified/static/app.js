@@ -2220,13 +2220,15 @@ class WiFiJammerController {
       channel = selectedOption ? parseInt(selectedOption.dataset.channel) : null;
     }
 
-    // Check if trying to attack robot's own network (for mass and targeted modes)
+    // Check if trying to attack robot's own network (for mass and targeted modes only)
+    // Client mode allows attacking the robot's network but not the robot's device
     if (this.robotNetworkBssid && targetBssids.includes(this.robotNetworkBssid) && selectedMode !== 'client') {
       alert('Cannot attack the robot\'s own network!');
       return;
     }
 
     // Check if trying to attack robot's own device (for client mode)
+    // This prevents attacking the robot itself even when attacking its network
     if (selectedMode === 'client' && this.robotMac && targetMacs.includes(this.robotMac)) {
       alert('Cannot attack the robot\'s own device!');
       return;

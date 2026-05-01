@@ -71,3 +71,32 @@ def test_jamming_loop_clears_running_state_when_duration_expires(monkeypatch):
     assert jammer._status.state == JammerState.IDLE
     assert jammer._status.mode is None
     assert jammer._status.target_bssid is None
+
+
+def test_jamming_loop_stops_after_repeated_send_errors(monkeypatch):
+    jammer = make_jammer()
+    jammer.monitor_interface = "wlan1"
+    jammer._stop_event = threading.Event()
+    jammer._status_lock = threading.Lock()
+    jammer._status = JammerStatus(
+        state=JammerState.RUNNING,
+        mode=JammerMode.MASS,
+        target_bssid="AA:BB:CC:DD:EE:FF",
+        channel=1,
+        start_time=0.0,
+    )
+    jammer._protected_networks = set()
+    jammer._set_managed_mode = lambda: True
+    jammer._build_deauth_packet = lambda bssid: (_ for _ in ()).throw(ValueError("bad packet"))
+    monkeypatch.setattr("picarx_unified.attacks.wifi_jammer.time.sleep", lambda _: None)
+
+    jammer._jamming_loop(
+        mode=JammerMode.MASS,
+        target_bssids=["AA:BB:CC:DD:EE:FF"],
+        channel=None,
+        packet_rate=100,
+    )
+
+    assert jammer._stop_event.is_set()
+    assert jammer._status.state == JammerState.ERROR
+    assert "repeated send errors" in jammer._status.error_message

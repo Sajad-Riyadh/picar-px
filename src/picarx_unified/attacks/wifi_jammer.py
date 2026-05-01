@@ -790,6 +790,8 @@ class WifiJammer:
         start_time = time.time()
         packet_interval = 1.0 / packet_rate
         target_macs = target_macs or []
+        consecutive_send_errors = 0
+        max_consecutive_send_errors = 10
 
         logger.info(f"Jamming loop started - Mode: {mode}, BSSIDs: {len(target_bssids)}, MACs: {len(target_macs)}, Rate: {packet_rate} pps")
 
@@ -811,8 +813,8 @@ class WifiJammer:
                         if self._stop_event.is_set():
                             break
 
-                        # Skip protected networks
-                        if bssid in self._protected_networks:
+                        # Skip protected networks (but allow robot's network in client mode)
+                        if bssid in self._protected_networks and bssid != self._robot_network_bssid:
                             logger.debug(f"Skipping protected network: {bssid}")
                             continue
 
@@ -820,7 +822,7 @@ class WifiJammer:
                             if self._stop_event.is_set():
                                 break
 
-                            # Skip protected MACs
+                            # Skip protected MACs (especially robot's MAC)
                             if mac in self._protected_macs:
                                 logger.debug(f"Skipping protected MAC: {mac}")
                                 continue
@@ -835,6 +837,14 @@ class WifiJammer:
 
                             except Exception as e:
                                 logger.error(f"Error sending deauth to {mac} on {bssid}: {e}")
+                                consecutive_send_errors += 1
+                                if consecutive_send_errors >= max_consecutive_send_errors:
+                                    self._update_status(
+                                        state=JammerState.ERROR,
+                                        error_message=f"Stopping after repeated send errors: {e}",
+                                    )
+                                    self._stop_event.set()
+                                    break
 
                 else:
                     # Mass or targeted mode: target BSSIDs
@@ -856,6 +866,14 @@ class WifiJammer:
 
                         except Exception as e:
                             logger.error(f"Error sending deauth to {bssid}: {e}")
+                            consecutive_send_errors += 1
+                            if consecutive_send_errors >= max_consecutive_send_errors:
+                                self._update_status(
+                                    state=JammerState.ERROR,
+                                    error_message=f"Stopping after repeated send errors: {e}",
+                                )
+                                self._stop_event.set()
+                                break
 
                 # Sleep to maintain packet rate
                 time.sleep(packet_interval)
@@ -941,12 +959,14 @@ class WifiJammer:
             # Detect and protect robot network
             self._detect_robot_network()
 
-            # Validate that robot network is not in targets
-            if self._robot_network_bssid and self._robot_network_bssid in target_bssids:
-                return {
-                    "status": "error",
-                    "message": f"Cannot attack robot's own network ({self._robot_network_bssid})"
-                }
+            # Validate that robot network is not in targets (except for client mode)
+            # In client mode, we allow attacking the robot's network but not the robot's device
+            if mode_enum != JammerMode.CLIENT:
+                if self._robot_network_bssid and self._robot_network_bssid in target_bssids:
+                    return {
+                        "status": "error",
+                        "message": f"Cannot attack robot's own network ({self._robot_network_bssid})"
+                    }
 
             # Validate that robot MAC is not in client targets
             if target_macs and self._robot_mac and self._robot_mac in target_macs:

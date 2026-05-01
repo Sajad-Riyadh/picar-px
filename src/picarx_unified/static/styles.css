@@ -1327,6 +1327,20 @@ select:focus {
   font-size: 12px;
 }
 
+.info-note {
+  padding: 8px 12px;
+  margin: 8px 0;
+  background: var(--surface);
+  border-left: 3px solid var(--ok);
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.info-note small {
+  color: var(--text);
+}
+
 .client-list {
   max-height: 200px;
   overflow-y: auto;
