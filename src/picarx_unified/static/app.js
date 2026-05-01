@@ -1911,8 +1911,11 @@ class WiFiJammerController {
       if (data.networks && Array.isArray(data.networks)) {
         this.networks = data.networks;
         this.renderNetworkList();
+        this.populateClientNetworkSelect();
       } else {
         this.dom.networkList.innerHTML = '<div class="network-placeholder">No networks found</div>';
+        this.networks = [];
+        this.populateClientNetworkSelect();
       }
 
       // Update robot network info
