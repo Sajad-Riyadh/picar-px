@@ -262,6 +262,36 @@ class WifiJammer:
             self._update_status(state=JammerState.ERROR, error_message="Timeout setting monitor mode")
             return False
 
+    def _set_managed_mode(self) -> bool:
+        """Set the WiFi interface back to managed mode for normal scans."""
+        try:
+            subprocess.run(
+                ["sudo", "ip", "link", "set", self.monitor_interface, "down"],
+                check=True,
+                capture_output=True,
+                timeout=5
+            )
+            subprocess.run(
+                ["sudo", "iw", "dev", self.monitor_interface, "set", "type", "managed"],
+                check=True,
+                capture_output=True,
+                timeout=5
+            )
+            subprocess.run(
+                ["sudo", "ip", "link", "set", self.monitor_interface, "up"],
+                check=True,
+                capture_output=True,
+                timeout=5
+            )
+            logger.info(f"Reset {self.monitor_interface} to managed mode")
+            return True
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Failed to set managed mode: {e}")
+            return False
+        except subprocess.TimeoutExpired:
+            logger.error("Timeout setting managed mode")
+            return False
+
     def _set_channel(self, channel: int) -> bool:
         """Set the WiFi channel"""
         try:
@@ -296,6 +326,8 @@ class WifiJammer:
 
         try:
             logger.info(f"Starting network scan on {self.monitor_interface}...")
+
+            self._set_managed_mode()
 
             # Use iw dev scan for passive scanning
             result = subprocess.run(
@@ -483,6 +515,7 @@ class WifiJammer:
                         self._status.target_bssid = None
                         self._status.channel = None
                         self._status.start_time = None
+            self._set_managed_mode()
             logger.info("Jamming loop stopped")
 
     def start_attack(
@@ -614,26 +647,4 @@ class WifiJammer:
         if self._status.state == JammerState.RUNNING:
             self.stop_attack()
 
-        # Reset interface to managed mode
-        try:
-            subprocess.run(
-                ["sudo", "ip", "link", "set", self.monitor_interface, "down"],
-                check=True,
-                capture_output=True,
-                timeout=5
-            )
-            subprocess.run(
-                ["sudo", "iw", "dev", self.monitor_interface, "set", "type", "managed"],
-                check=True,
-                capture_output=True,
-                timeout=5
-            )
-            subprocess.run(
-                ["sudo", "ip", "link", "set", self.monitor_interface, "up"],
-                check=True,
-                capture_output=True,
-                timeout=5
-            )
-            logger.info(f"Reset {self.monitor_interface} to managed mode")
-        except Exception as e:
-            logger.error(f"Error resetting interface: {e}")
+        self._set_managed_mode()

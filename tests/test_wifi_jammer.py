@@ -55,6 +55,7 @@ def test_jamming_loop_clears_running_state_when_duration_expires(monkeypatch):
         start_time=0.0,
     )
     jammer._protected_networks = {"AA:BB:CC:DD:EE:FF"}
+    jammer._set_managed_mode = lambda: True
     times = iter([0.0, 1.0])
     monkeypatch.setattr("picarx_unified.attacks.wifi_jammer.time.time", lambda: next(times))
     monkeypatch.setattr("picarx_unified.attacks.wifi_jammer.time.sleep", lambda _: None)
