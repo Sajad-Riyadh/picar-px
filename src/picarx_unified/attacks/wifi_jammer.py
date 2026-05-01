@@ -341,20 +341,20 @@ class WifiJammer:
                     networks.append(self._create_network_info(current_network))
 
                 # Start new network
-                bssid = line.split("BSS ")[1].split()[0].upper()
+                bssid = line.split("BSS ", 1)[1].split()[0].split("(", 1)[0].upper()
                 current_network = {"bssid": bssid}
 
             elif "SSID:" in line:
-                current_network["essid"] = line.split("SSID: ")[1].strip('"') or "(Hidden)"
+                current_network["essid"] = line.split("SSID:", 1)[1].strip().strip('"') or "(Hidden)"
 
             elif "freq:" in line:
-                freq = int(line.split("freq: ")[1].split()[0])
+                freq = int(line.split("freq:", 1)[1].split()[0])
                 # Convert frequency to channel (2.4 GHz)
                 if 2400 <= freq <= 2500:
                     current_network["channel"] = (freq - 2407) // 5
 
             elif "signal:" in line:
-                signal = int(line.split("signal: ")[1].split()[0])
+                signal = int(float(line.split("signal:", 1)[1].split()[0]))
                 current_network["signal_strength"] = signal
 
             elif "RSN:" in line or "WPA:" in line:
