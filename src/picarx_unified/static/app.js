@@ -1854,6 +1854,16 @@ class WiFiJammerController {
     // Legal modal
     this.dom.cancelAttackBtn.addEventListener("click", () => this.hideLegalWarning());
     this.dom.confirmAttackBtn.addEventListener("click", () => this.confirmStartAttack());
+    this.dom.legalModal.addEventListener("click", (event) => {
+      if (event.target === this.dom.legalModal) {
+        this.hideLegalWarning();
+      }
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && !this.dom.legalModal.hidden) {
+        this.hideLegalWarning();
+      }
+    });
 
     // Attack mode change
     this.dom.attackModeRadios.forEach(radio => {

@@ -1520,6 +1520,10 @@ select:focus {
   padding: 20px;
 }
 
+.wifi-legal-modal[hidden] {
+  display: none;
+}
+
 .modal-content {
   background: var(--surface-strong);
   border: 1px solid var(--border);
