@@ -638,7 +638,283 @@ The browser dashboard includes camera display controls in the Camera panel. This
 - `Reset Display` returns the frame to `Medium` size and `Camera 4:3` shape.
 - The selected size and shape are saved locally in the browser as `PICARX_VIDEO_DISPLAY_SIZE` and `PICARX_VIDEO_DISPLAY_SHAPE`; they are not saved to backend robot settings.
 
-## 7. Future improvements
+## 8. WiFi Deauthentication Attack Feature
+
+### ⚠️ LEGAL WARNING
+
+**IMPORTANT:** This feature is for educational and authorized security testing purposes only.
+
+- Only use on networks you own or have explicit written permission to test
+- Unauthorized use is illegal and unethical
+- Users are solely responsible for their actions
+- This tool demonstrates 802.11 deauthentication vulnerabilities for research purposes
+
+### Overview
+
+The PiCar-X includes a WiFi Deauthentication Attack (WiFi Jammer) module that demonstrates how 802.11 deauthentication frames can be used to disconnect devices from wireless networks. This feature is designed for:
+
+- Educational cybersecurity demonstrations
+- Authorized security testing and penetration testing
+- Academic research and graduation projects
+- Understanding wireless network vulnerabilities
+
+### Technical Implementation
+
+The WiFi Jammer is implemented as a separate module (`src/picarx_unified/attacks/wifi_jammer.py`) that:
+
+- Uses Scapy to craft 802.11 deauthentication frames
+- Supports both mass and targeted attack modes
+- Automatically protects the robot's own management network
+- Runs in an isolated thread to avoid blocking robot control
+- Provides comprehensive status reporting and safety features
+
+### Hardware Requirements
+
+- **External USB WiFi Adapter**: Atheros AR9271 or similar monitor-mode capable adapter
+- **Interface Configuration**: `wlan1` for monitor mode, `wlan0` for management
+- **Software Dependencies**: Scapy (`pip install scapy`)
+
+### API Endpoints
+
+The WiFi Jammer exposes the following REST API endpoints:
+
+#### `GET /api/jammer/robot_network`
+Returns information about the robot's own network (protected from attacks).
+
+```bash
+curl http://127.0.0.1:8080/api/jammer/robot_network
+```
+
+Response:
+```json
+{
+  "bssid": "AA:BB:CC:DD:EE:FF",
+  "essid": "RobotNetwork",
+  "interface": "wlan0"
+}
+```
+
+#### `GET /api/jammer/scan`
+Scans for nearby WiFi networks.
+
+```bash
+curl "http://127.0.0.1:8080/api/jammer/scan?duration=10"
+```
+
+Response:
+```json
+{
+  "networks": [
+    {
+      "bssid": "AA:BB:CC:DD:EE:FF",
+      "essid": "NetworkName",
+      "channel": 6,
+      "signal_strength": -45,
+      "encryption": "WPA/WPA2",
+      "is_robot_network": false
+    }
+  ],
+  "count": 1
+}
+```
+
+#### `POST /api/jammer/start`
+Starts a deauthentication attack.
+
+```bash
+curl -X POST http://127.0.0.1:8080/api/jammer/start \
+  -H "Content-Type: application/json" \
+  -d '{
+    "mode": "mass",
+    "target_bssids": ["AA:BB:CC:DD:EE:FF"],
+    "channel": 6,
+    "pps": 100,
+    "duration": 60
+  }'
+```
+
+Parameters:
+- `mode`: "mass" or "targeted"
+- `target_bssids`: Array of target BSSID strings
+- `channel`: WiFi channel (optional, auto-detect if not specified)
+- `pps`: Packets per second (10-500)
+- `duration`: Attack duration in seconds (optional)
+
+#### `POST /api/jammer/stop`
+Stops the current attack.
+
+```bash
+curl -X POST http://127.0.0.1:8080/api/jammer/stop
+```
+
+Response:
+```json
+{
+  "status": "stopped",
+  "packets_sent": 12345,
+  "uptime_seconds": 45.67
+}
+```
+
+#### `GET /api/jammer/status`
+Gets current jammer status.
+
+```bash
+curl http://127.0.0.1:8080/api/jammer/status
+```
+
+Response:
+```json
+{
+  "state": "running",
+  "mode": "mass",
+  "target_bssid": "AA:BB:CC:DD:EE:FF",
+  "channel": 6,
+  "packets_sent": 12345,
+  "uptime_seconds": 45.67,
+  "error_message": "",
+  "networks_discovered": 5,
+  "robot_network_bssid": "AA:BB:CC:DD:EE:FF",
+  "robot_network_essid": "RobotNetwork"
+}
+```
+
+### Web Control Panel
+
+The browser dashboard includes a dedicated "WiFi Jammer" panel with:
+
+#### Network Discovery
+- **Scan for Networks**: Discovers nearby WiFi networks
+- **Network List**: Shows ESSID, BSSID, channel, signal strength, encryption
+- **Selection Controls**: Select/deselect networks for attack
+- **Robot Protection**: Automatically identifies and protects robot's network
+
+#### Attack Configuration
+- **Attack Modes**: Mass deauth (selected networks) or targeted (single BSSID)
+- **Packet Rate**: Adjustable packets per second (10-500)
+- **Duration**: Configurable attack duration
+- **Safety Controls**: Legal warning confirmation before attack
+
+#### Real-time Status
+- **Attack State**: Current operational status
+- **Statistics**: Packets sent, uptime, targets
+- **Network Info**: Robot's protected network details
+
+### Safety Features
+
+The WiFi Jammer includes multiple safety mechanisms:
+
+1. **Network Protection**: Automatically detects and protects robot's management network
+2. **Input Validation**: Validates BSSID format, channel ranges, packet rates
+3. **Thread Isolation**: Runs in separate thread to avoid blocking robot control
+4. **State Management**: Prevents multiple concurrent attacks
+5. **Legal Warnings**: Requires user acknowledgment before starting attacks
+6. **Error Handling**: Comprehensive error checking and reporting
+
+### Defense Techniques
+
+Understanding how to defend against deauthentication attacks:
+
+#### 1. Use WPA3
+WPA3 includes improved security features that make deauthentication attacks more difficult:
+- Simultaneous Authentication of Equals (SAE)
+- Protected Management Frames (PMF)
+- Forward secrecy
+
+#### 2. Enable Protected Management Frames (PMF)
+PMF (802.11w) protects management frames, including deauthentication:
+```bash
+# In hostapd configuration
+ieee80211w=2
+```
+
+#### 3. Monitor for Anomalies
+- Watch for frequent deauthentication events
+- Monitor for unusual traffic patterns
+- Use intrusion detection systems
+
+#### 4. Network Segmentation
+- Separate critical systems from guest networks
+- Use VLANs for network isolation
+- Implement proper access controls
+
+#### 5. Client-Side Protections
+- Keep client devices updated
+- Use reputable network hardware
+- Implement client-side security policies
+
+### Educational Use Cases
+
+This feature is suitable for:
+
+1. **Cybersecurity Education**: Demonstrating 802.11 protocol vulnerabilities
+2. **Penetration Testing Practice**: Authorized security testing scenarios
+3. **Academic Research**: Studying wireless network security
+4. **Graduation Projects**: Comprehensive security demonstrations
+5. **Security Awareness**: Understanding wireless threats
+
+### Troubleshooting
+
+#### Scapy Not Available
+```bash
+pip install scapy
+```
+
+#### Monitor Mode Issues
+```bash
+# Check interface status
+iw dev wlan1 info
+
+# Set monitor mode manually
+sudo ip link set wlan1 down
+sudo iw dev wlan1 set type monitor
+sudo ip link set wlan1 up
+```
+
+#### Permission Denied
+Ensure the service has sufficient permissions:
+```bash
+# Add user to netdev group
+sudo usermod -a -G netdev car
+
+# Or run with sudo
+sudo systemctl restart picarx-unified.service
+```
+
+#### No Networks Found
+- Check WiFi adapter is properly connected
+- Verify monitor mode is enabled
+- Ensure adapter supports monitor mode
+- Check for interference or hardware issues
+
+### Configuration
+
+The WiFi Jammer uses the following default configuration (can be modified in `wifi_jammer.py`):
+
+- **Monitor Interface**: `wlan1`
+- **Management Interface**: `wlan0`
+- **Default Packet Rate**: 100 pps
+- **Maximum Packet Rate**: 500 pps
+- **Default Scan Duration**: 10 seconds
+
+### Best Practices
+
+1. **Always Get Permission**: Only test on networks you own or have written permission
+2. **Use Isolated Environment**: Test in controlled lab environments
+3. **Document Everything**: Keep records of authorized testing
+4. **Monitor Impact**: Watch for effects on other systems
+5. **Stop When Done**: Don't leave attacks running unnecessarily
+6. **Stay Updated**: Keep security knowledge current
+
+### References
+
+- IEEE 802.11 Standard
+- Scapy Documentation: https://scapy.net
+- Aircrack-ng Suite: https://www.aircrack-ng.org
+- Kali Linux Tools: https://www.kali.org/tools/
+- Wireless Security Resources: https://www.wireshark.org/docs/
+
+## 9. Future improvements
 
 - Replace Haar face detection with a Pi-friendly detector such as MediaPipe or a lightweight YOLO model once you confirm performance on your Pi 5.
 - Upgrade the chunked WebSocket voice path to WebRTC if you need lower latency and built-in echo cancellation.

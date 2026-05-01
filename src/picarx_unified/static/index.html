@@ -458,6 +458,108 @@
         </form>
       </section>
 
+      <section id="panel-wifi" class="ctrl-panel" hidden>
+        <div class="wifi-warning">
+          <p><strong>⚠️ LEGAL WARNING:</strong> Only use this feature on networks you own or have explicit written permission to test. Unauthorized use is illegal and unethical. This is for educational/research purposes only.</p>
+        </div>
+
+        <div class="wifi-status-panel">
+          <div class="status-row">
+            <span class="status-label">Status:</span>
+            <span class="status-value" id="jammer-status">Idle</span>
+          </div>
+          <div class="status-row">
+            <span class="status-label">Mode:</span>
+            <span class="status-value" id="jammer-mode">--</span>
+          </div>
+          <div class="status-row">
+            <span class="status-label">Packets Sent:</span>
+            <span class="status-value" id="jammer-packets">0</span>
+          </div>
+          <div class="status-row">
+            <span class="status-label">Uptime:</span>
+            <span class="status-value" id="jammer-uptime">0s</span>
+          </div>
+          <div class="status-row">
+            <span class="status-label">Robot Network:</span>
+            <span class="status-value" id="robot-network">Detecting...</span>
+          </div>
+        </div>
+
+        <div class="wifi-scan-section">
+          <div class="section-header">
+            <span class="section-title">Network Discovery</span>
+            <button id="scan-btn" class="btn btn-primary btn-sm">Scan for Networks</button>
+          </div>
+          <div class="scan-controls">
+            <button id="select-all-btn" class="btn btn-xs btn-outline">Select All</button>
+            <button id="deselect-all-btn" class="btn btn-xs btn-outline">Deselect All</button>
+            <button id="select-except-robot-btn" class="btn btn-xs btn-accent">Deauth All Except Robot's WiFi</button>
+          </div>
+          <div id="network-list" class="network-list">
+            <div class="network-placeholder">Click "Scan for Networks" to discover nearby WiFi networks</div>
+          </div>
+        </div>
+
+        <div class="wifi-attack-section">
+          <div class="section-header">
+            <span class="section-title">Attack Configuration</span>
+          </div>
+
+          <div class="attack-mode-section">
+            <label class="field-label">Attack Mode:</label>
+            <div class="radio-group">
+              <label class="radio-label">
+                <input type="radio" name="attack-mode" value="mass" checked />
+                <span>Mass Deauth (Selected Networks)</span>
+              </label>
+              <label class="radio-label">
+                <input type="radio" name="attack-mode" value="targeted" />
+                <span>Targeted Deauth (Single BSSID)</span>
+              </label>
+            </div>
+          </div>
+
+          <div id="targeted-input-section" class="targeted-section hidden">
+            <label class="field-label">Target BSSID:</label>
+            <input id="target-bssid-input" type="text" placeholder="AA:BB:CC:DD:EE:FF" pattern="^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$" />
+            <label class="field-label">Channel (optional):</label>
+            <input id="target-channel-input" type="number" min="1" max="14" placeholder="Auto" />
+          </div>
+
+          <div class="attack-params">
+            <div class="slider-row">
+              <span>Packet Rate (pps)</span>
+              <input id="packet-rate-slider" type="range" min="10" max="500" value="100" />
+              <strong id="packet-rate-value">100</strong>
+            </div>
+            <div class="slider-row">
+              <span>Duration (seconds)</span>
+              <input id="duration-slider" type="range" min="10" max="300" value="60" />
+              <strong id="duration-value">60s</strong>
+            </div>
+          </div>
+
+          <div class="attack-controls">
+            <button id="start-attack-btn" class="btn btn-danger btn-full">Start Attack</button>
+            <button id="stop-attack-btn" class="btn btn-outline btn-full" disabled>Stop Attack</button>
+          </div>
+        </div>
+
+        <div class="wifi-legal-modal" id="legal-modal" hidden>
+          <div class="modal-content">
+            <h3>⚠️ Legal Warning</h3>
+            <p>You must only use this feature on networks you own or have explicit permission to test.</p>
+            <p>Unauthorized use is illegal and unethical. You are solely responsible for your actions.</p>
+            <p>This tool is for educational and authorized security testing purposes only.</p>
+            <div class="modal-actions">
+              <button id="cancel-attack-btn" class="btn btn-outline">Cancel</button>
+              <button id="confirm-attack-btn" class="btn btn-danger">I Understand, Start Attack</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <section id="panel-safety" class="ctrl-panel" hidden>
         <div class="safety-note">
           <p>Motor protection, steering limits, camera limits, ultrasonic obstacle avoidance, manual override, and emergency stop all remain active at all times.</p>

@@ -1239,3 +1239,358 @@ select:focus {
   background: rgba(255, 255, 255, 0.14);
   border-radius: 999px;
 }
+
+/* WiFi Jammer Panel Styles */
+.wifi-warning {
+  padding: 12px;
+  margin-bottom: 16px;
+  background: var(--danger-soft);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-sm);
+  color: var(--danger);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.wifi-warning strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.wifi-status-panel {
+  padding: 12px;
+  margin-bottom: 16px;
+  background: var(--surface-soft);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+}
+
+.status-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.status-row:last-child {
+  border-bottom: none;
+}
+
+.status-label {
+  color: var(--text-soft);
+  font-size: 12px;
+}
+
+.status-value {
+  color: var(--text);
+  font-weight: 600;
+  font-size: 12px;
+  font-family: var(--font-mono);
+}
+
+.wifi-scan-section {
+  margin-bottom: 20px;
+}
+
+.section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.section-title {
+  font-weight: 600;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.scan-controls {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.network-list {
+  max-height: 300px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-soft);
+}
+
+.network-placeholder {
+  padding: 20px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.network-item {
+  display: flex;
+  align-items: center;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  transition: background var(--transition);
+}
+
+.network-item:last-child {
+  border-bottom: none;
+}
+
+.network-item:hover {
+  background: var(--surface-soft);
+}
+
+.network-item.robot-network {
+  background: var(--ok-soft);
+  border-left: 3px solid var(--ok);
+}
+
+.network-checkbox {
+  margin-right: 12px;
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+}
+
+.network-checkbox:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.network-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.network-essid {
+  font-weight: 600;
+  color: var(--text);
+  font-size: 13px;
+  margin-bottom: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.network-details {
+  display: flex;
+  gap: 12px;
+  font-size: 11px;
+  color: var(--text-soft);
+  font-family: var(--font-mono);
+}
+
+.network-badge {
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.network-badge.robot {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+.network-signal {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.signal-bar {
+  width: 3px;
+  background: var(--muted);
+  border-radius: 1px;
+}
+
+.signal-bar.active {
+  background: var(--ok);
+}
+
+.wifi-attack-section {
+  margin-bottom: 20px;
+}
+
+.attack-mode-section {
+  margin-bottom: 16px;
+}
+
+.field-label {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--text-soft);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.radio-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.radio-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+  transition: all var(--transition);
+}
+
+.radio-label:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-soft);
+}
+
+.radio-label input[type="radio"] {
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+}
+
+.radio-label span {
+  font-size: 13px;
+  color: var(--text);
+}
+
+.targeted-section {
+  margin-bottom: 16px;
+  padding: 12px;
+  background: var(--surface-soft);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+}
+
+.targeted-section input[type="text"],
+.targeted-section input[type="number"] {
+  width: 100%;
+  padding: 8px 12px;
+  margin-bottom: 8px;
+  background: var(--surface-strong);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  transition: border-color var(--transition);
+}
+
+.targeted-section input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.attack-params {
+  margin-bottom: 16px;
+}
+
+.attack-controls {
+  display: flex;
+  gap: 8px;
+}
+
+.attack-controls button {
+  flex: 1;
+}
+
+.attack-controls button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.wifi-legal-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 20px;
+}
+
+.modal-content {
+  background: var(--surface-strong);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 24px;
+  max-width: 500px;
+  width: 100%;
+  box-shadow: var(--shadow);
+}
+
+.modal-content h3 {
+  margin: 0 0 16px;
+  color: var(--danger);
+  font-size: 18px;
+}
+
+.modal-content p {
+  margin: 0 0 12px;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 20px;
+}
+
+.modal-actions button {
+  flex: 1;
+}
+
+/* WiFi Jammer specific button styles */
+.btn-primary {
+  background: var(--accent);
+  color: var(--bg);
+  border: 1px solid var(--accent-strong);
+}
+
+.btn-primary:hover {
+  background: var(--accent-strong);
+}
+
+.btn-accent {
+  background: var(--info);
+  color: var(--bg);
+  border: 1px solid var(--info);
+}
+
+.btn-accent:hover {
+  background: var(--info-soft);
+  color: var(--info);
+}
+
+/* Responsive adjustments for WiFi Jammer */
+@media (max-width: 768px) {
+  .scan-controls {
+    flex-direction: column;
+  }
+
+  .network-details {
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .attack-controls {
+    flex-direction: column;
+  }
+
+  .modal-actions {
+    flex-direction: column;
+  }
+}

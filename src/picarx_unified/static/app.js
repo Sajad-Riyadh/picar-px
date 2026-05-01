@@ -29,6 +29,11 @@ const ENDPOINTS = {
   emergencyReset: "/api/emergency-reset",
   visionQuestion: "/api/vision/question",
   voiceSocket: "/ws/voice",
+  jammerRobotNetwork: "/api/jammer/robot_network",
+  jammerScan: "/api/jammer/scan",
+  jammerStart: "/api/jammer/start",
+  jammerStop: "/api/jammer/stop",
+  jammerStatus: "/api/jammer/status",
 };
 
 function $(selector) {
@@ -1793,7 +1798,380 @@ class PiCarDashboard {
 
 }
 
+// WiFi Jammer Controller
+class WiFiJammerController {
+  constructor() {
+    this.dom = {
+      scanBtn: $("#scan-btn"),
+      selectAllBtn: $("#select-all-btn"),
+      deselectAllBtn: $("#deselect-all-btn"),
+      selectExceptRobotBtn: $("#select-except-robot-btn"),
+      networkList: $("#network-list"),
+      startAttackBtn: $("#start-attack-btn"),
+      stopAttackBtn: $("#stop-attack-btn"),
+      legalModal: $("#legal-modal"),
+      cancelAttackBtn: $("#cancel-attack-btn"),
+      confirmAttackBtn: $("#confirm-attack-btn"),
+      statusDisplay: $("#jammer-status"),
+      modeDisplay: $("#jammer-mode"),
+      packetsDisplay: $("#jammer-packets"),
+      uptimeDisplay: $("#jammer-uptime"),
+      robotNetworkDisplay: $("#robot-network"),
+      packetRateSlider: $("#packet-rate-slider"),
+      packetRateValue: $("#packet-rate-value"),
+      durationSlider: $("#duration-slider"),
+      durationValue: $("#duration-value"),
+      targetBssidInput: $("#target-bssid-input"),
+      targetChannelInput: $("#target-channel-input"),
+      attackModeRadios: $$('input[name="attack-mode"]'),
+      targetedSection: $("#targeted-input-section"),
+    };
+
+    this.networks = [];
+    this.selectedNetworks = new Set();
+    this.robotNetworkBssid = null;
+    this.isAttacking = false;
+    this.statusInterval = null;
+    this.pendingAttackConfig = null;
+
+    this.bindEvents();
+    this.startStatusPolling();
+  }
+
+  bindEvents() {
+    // Scan button
+    this.dom.scanBtn.addEventListener("click", () => this.scanNetworks());
+
+    // Selection controls
+    this.dom.selectAllBtn.addEventListener("click", () => this.selectAllNetworks());
+    this.dom.deselectAllBtn.addEventListener("click", () => this.deselectAllNetworks());
+    this.dom.selectExceptRobotBtn.addEventListener("click", () => this.selectAllExceptRobot());
+
+    // Attack controls
+    this.dom.startAttackBtn.addEventListener("click", () => this.showLegalWarning());
+    this.dom.stopAttackBtn.addEventListener("click", () => this.stopAttack());
+
+    // Legal modal
+    this.dom.cancelAttackBtn.addEventListener("click", () => this.hideLegalWarning());
+    this.dom.confirmAttackBtn.addEventListener("click", () => this.confirmStartAttack());
+
+    // Attack mode change
+    this.dom.attackModeRadios.forEach(radio => {
+      radio.addEventListener("change", () => this.handleAttackModeChange());
+    });
+
+    // Sliders
+    this.dom.packetRateSlider.addEventListener("input", () => {
+      this.dom.packetRateValue.textContent = this.dom.packetRateSlider.value;
+    });
+
+    this.dom.durationSlider.addEventListener("input", () => {
+      this.dom.durationValue.textContent = `${this.dom.durationSlider.value}s`;
+    });
+  }
+
+  async scanNetworks() {
+    try {
+      this.dom.scanBtn.disabled = true;
+      this.dom.scanBtn.textContent = "Scanning...";
+      this.dom.networkList.innerHTML = '<div class="network-placeholder">Scanning for networks...</div>';
+
+      const response = await fetch(`${ENDPOINTS.jammerScan}?duration=10`);
+      const data = await response.json();
+
+      if (data.networks && Array.isArray(data.networks)) {
+        this.networks = data.networks;
+        this.renderNetworkList();
+      } else {
+        this.dom.networkList.innerHTML = '<div class="network-placeholder">No networks found</div>';
+      }
+
+      // Update robot network info
+      await this.updateRobotNetworkInfo();
+
+    } catch (error) {
+      console.error("Scan failed:", error);
+      this.dom.networkList.innerHTML = '<div class="network-placeholder">Scan failed. Please try again.</div>';
+    } finally {
+      this.dom.scanBtn.disabled = false;
+      this.dom.scanBtn.textContent = "Scan for Networks";
+    }
+  }
+
+  async updateRobotNetworkInfo() {
+    try {
+      const response = await fetch(ENDPOINTS.jammerRobotNetwork);
+      const data = await response.json();
+
+      if (data.bssid) {
+        this.robotNetworkBssid = data.bssid;
+        const essid = data.essid || "Unknown";
+        this.dom.robotNetworkDisplay.textContent = `${essid} (${data.bssid})`;
+        this.dom.robotNetworkDisplay.style.color = "var(--ok)";
+      } else {
+        this.dom.robotNetworkDisplay.textContent = "Not connected";
+        this.dom.robotNetworkDisplay.style.color = "var(--muted)";
+      }
+    } catch (error) {
+      console.error("Failed to get robot network info:", error);
+      this.dom.robotNetworkDisplay.textContent = "Error detecting";
+    }
+  }
+
+  renderNetworkList() {
+    if (this.networks.length === 0) {
+      this.dom.networkList.innerHTML = '<div class="network-placeholder">No networks found</div>';
+      return;
+    }
+
+    this.dom.networkList.innerHTML = this.networks.map(network => {
+      const isRobotNetwork = network.is_robot_network || network.bssid === this.robotNetworkBssid;
+      const isSelected = this.selectedNetworks.has(network.bssid);
+
+      // Signal strength bars
+      const signalStrength = Math.min(5, Math.max(1, Math.ceil((network.signal_strength + 100) / 20)));
+      const signalBars = Array(5).fill(0).map((_, i) =>
+        `<div class="signal-bar ${i < signalStrength ? 'active' : ''}"></div>`
+      ).join('');
+
+      return `
+        <div class="network-item ${isRobotNetwork ? 'robot-network' : ''}" data-bssid="${network.bssid}">
+          <input
+            type="checkbox"
+            class="network-checkbox"
+            data-bssid="${network.bssid}"
+            ${isSelected ? 'checked' : ''}
+            ${isRobotNetwork ? 'disabled' : ''}
+          />
+          <div class="network-info">
+            <div class="network-essid">
+              ${network.essid}
+              ${isRobotNetwork ? '<span class="network-badge robot">🛡️ Robot Network</span>' : ''}
+            </div>
+            <div class="network-details">
+              <span>BSSID: ${network.bssid}</span>
+              <span>CH: ${network.channel}</span>
+              <span>${network.encryption || 'Open'}</span>
+              <div class="network-signal">
+                ${signalBars}
+                <span>${network.signal_strength} dBm</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    // Bind checkbox events
+    this.dom.networkList.querySelectorAll('.network-checkbox').forEach(checkbox => {
+      checkbox.addEventListener('change', (e) => {
+        const bssid = e.target.dataset.bssid;
+        if (e.target.checked) {
+          this.selectedNetworks.add(bssid);
+        } else {
+          this.selectedNetworks.delete(bssid);
+        }
+      });
+    });
+  }
+
+  selectAllNetworks() {
+    this.networks.forEach(network => {
+      if (!network.is_robot_network && network.bssid !== this.robotNetworkBssid) {
+        this.selectedNetworks.add(network.bssid);
+      }
+    });
+    this.renderNetworkList();
+  }
+
+  deselectAllNetworks() {
+    this.selectedNetworks.clear();
+    this.renderNetworkList();
+  }
+
+  selectAllExceptRobot() {
+    this.selectedNetworks.clear();
+    this.networks.forEach(network => {
+      if (!network.is_robot_network && network.bssid !== this.robotNetworkBssid) {
+        this.selectedNetworks.add(network.bssid);
+      }
+    });
+    this.renderNetworkList();
+  }
+
+  handleAttackModeChange() {
+    const selectedMode = document.querySelector('input[name="attack-mode"]:checked').value;
+
+    if (selectedMode === 'targeted') {
+      this.dom.targetedSection.classList.remove('hidden');
+    } else {
+      this.dom.targetedSection.classList.add('hidden');
+    }
+  }
+
+  showLegalWarning() {
+    // Prepare attack configuration
+    const selectedMode = document.querySelector('input[name="attack-mode"]:checked').value;
+    let targetBssids = [];
+    let channel = null;
+
+    if (selectedMode === 'mass') {
+      if (this.selectedNetworks.size === 0) {
+        alert('Please select at least one network to attack.');
+        return;
+      }
+      targetBssids = Array.from(this.selectedNetworks);
+    } else {
+      const bssid = this.dom.targetBssidInput.value.trim();
+      if (!bssid) {
+        alert('Please enter a target BSSID.');
+        return;
+      }
+      if (!/^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$/.test(bssid)) {
+        alert('Invalid BSSID format. Use AA:BB:CC:DD:EE:FF format.');
+        return;
+      }
+      targetBssids = [bssid];
+      channel = this.dom.targetChannelInput.value ? parseInt(this.dom.targetChannelInput.value) : null;
+    }
+
+    // Check if trying to attack robot's own network
+    if (this.robotNetworkBssid && targetBssids.includes(this.robotNetworkBssid)) {
+      alert('Cannot attack the robot\'s own network!');
+      return;
+    }
+
+    this.pendingAttackConfig = {
+      mode: selectedMode,
+      target_bssids: targetBssids,
+      channel: channel,
+      pps: parseInt(this.dom.packetRateSlider.value),
+      duration: parseInt(this.dom.durationSlider.value),
+    };
+
+    this.dom.legalModal.hidden = false;
+  }
+
+  hideLegalWarning() {
+    this.dom.legalModal.hidden = true;
+    this.pendingAttackConfig = null;
+  }
+
+  async confirmStartAttack() {
+    if (!this.pendingAttackConfig) {
+      return;
+    }
+
+    try {
+      const response = await fetch(ENDPOINTS.jammerStart, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(this.pendingAttackConfig),
+      });
+
+      const result = await response.json();
+
+      if (result.status === 'started') {
+        this.isAttacking = true;
+        this.updateAttackUI(true);
+        this.hideLegalWarning();
+      } else {
+        alert(`Failed to start attack: ${result.message || 'Unknown error'}`);
+      }
+    } catch (error) {
+      console.error('Failed to start attack:', error);
+      alert(`Failed to start attack: ${error.message}`);
+    }
+  }
+
+  async stopAttack() {
+    try {
+      const response = await fetch(ENDPOINTS.jammerStop, {
+        method: 'POST',
+      });
+
+      const result = await response.json();
+
+      if (result.status === 'stopped') {
+        this.isAttacking = false;
+        this.updateAttackUI(false);
+      }
+    } catch (error) {
+      console.error('Failed to stop attack:', error);
+      alert(`Failed to stop attack: ${error.message}`);
+    }
+  }
+
+  updateAttackUI(isAttacking) {
+    this.dom.startAttackBtn.disabled = isAttacking;
+    this.dom.stopAttackBtn.disabled = !isAttacking;
+
+    if (isAttacking) {
+      this.dom.startAttackBtn.textContent = 'Attack Running...';
+    } else {
+      this.dom.startAttackBtn.textContent = 'Start Attack';
+    }
+  }
+
+  startStatusPolling() {
+    // Update status every second
+    this.statusInterval = setInterval(() => this.updateStatus(), 1000);
+  }
+
+  async updateStatus() {
+    try {
+      const response = await fetch(ENDPOINTS.jammerStatus);
+      const status = await response.json();
+
+      // Update status displays
+      this.dom.statusDisplay.textContent = this.formatStatus(status.state);
+      this.dom.modeDisplay.textContent = status.mode || '--';
+      this.dom.packetsDisplay.textContent = status.packets_sent || 0;
+      this.dom.uptimeDisplay.textContent = this.formatUptime(status.uptime_seconds);
+
+      // Update attack state
+      if (status.state === 'running' && !this.isAttacking) {
+        this.isAttacking = true;
+        this.updateAttackUI(true);
+      } else if (status.state !== 'running' && this.isAttacking) {
+        this.isAttacking = false;
+        this.updateAttackUI(false);
+      }
+
+    } catch (error) {
+      console.error('Failed to update jammer status:', error);
+    }
+  }
+
+  formatStatus(state) {
+    const statusMap = {
+      'idle': 'Idle',
+      'scanning': 'Scanning...',
+      'running': 'Running',
+      'error': 'Error',
+    };
+    return statusMap[state] || state;
+  }
+
+  formatUptime(seconds) {
+    if (!seconds || seconds < 1) return '0s';
+    if (seconds < 60) return `${Math.floor(seconds)}s`;
+    if (seconds < 3600) {
+      const mins = Math.floor(seconds / 60);
+      const secs = Math.floor(seconds % 60);
+      return `${mins}m ${secs}s`;
+    }
+    const hours = Math.floor(seconds / 3600);
+    const mins = Math.floor((seconds % 3600) / 60);
+    return `${hours}h ${mins}m`;
+  }
+}
+
 const dashboard = new PiCarDashboard();
+const wifiJammer = new WiFiJammerController();
+
 dashboard.init().catch(error => {
   const speechStatus = $("#speech-status");
   if (!speechStatus) return;
