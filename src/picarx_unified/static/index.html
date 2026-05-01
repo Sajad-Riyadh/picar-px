@@ -519,8 +519,11 @@
               </label>
               <label class="radio-label">
                 <input type="radio" name="attack-mode" value="client" />
-                <span>Client Deauth (Specific Devices)</span>
+                <span>Client Deauth (Specific Devices) ⚡</span>
               </label>
+            </div>
+            <div class="mode-description">
+              <small>💡 Client mode sends bidirectional deauth packets for maximum effectiveness</small>
             </div>
           </div>
 
@@ -553,8 +556,8 @@
           <div class="attack-params">
             <div class="slider-row">
               <span>Packet Rate (pps)</span>
-              <input id="packet-rate-slider" type="range" min="10" max="500" value="100" />
-              <strong id="packet-rate-value">100</strong>
+              <input id="packet-rate-slider" type="range" min="10" max="1000" value="200" />
+              <strong id="packet-rate-value">200</strong>
             </div>
             <div class="slider-row">
               <span>Duration (seconds)</span>

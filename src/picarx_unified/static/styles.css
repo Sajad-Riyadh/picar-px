@@ -1564,6 +1564,19 @@ select:focus {
   color: var(--text);
 }
 
+.mode-description {
+  margin-top: 8px;
+  padding: 8px 12px;
+  background: var(--surface-soft);
+  border-radius: var(--radius-sm);
+  border-left: 3px solid var(--accent);
+}
+
+.mode-description small {
+  color: var(--text);
+  font-size: 12px;
+}
+
 .targeted-section {
   margin-bottom: 16px;
   padding: 12px;

