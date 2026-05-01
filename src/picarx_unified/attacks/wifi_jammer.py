@@ -42,8 +42,9 @@ logger = logging.getLogger(__name__)
 
 class JammerMode(str, Enum):
     """Attack mode enumeration"""
-    MASS = "mass"
-    TARGETED = "targeted"
+    MASS = "mass"           # Attack all selected networks
+    TARGETED = "targeted"   # Attack specific BSSID
+    CLIENT = "client"       # Attack specific clients on networks
 
 
 class JammerState(str, Enum):
@@ -55,6 +56,24 @@ class JammerState(str, Enum):
 
 
 @dataclass
+class ClientInfo:
+    """Information about a client device connected to a network"""
+    mac: str
+    bssid: str  # The AP this client is connected to
+    signal_strength: int = 0
+    is_robot_device: bool = False
+
+    def to_dict(self) -> dict:
+        """Convert to dictionary for JSON serialization"""
+        return {
+            "mac": self.mac,
+            "bssid": self.bssid,
+            "signal_strength": self.signal_strength,
+            "is_robot_device": self.is_robot_device
+        }
+
+
+@dataclass
 class NetworkInfo:
     """Information about a discovered WiFi network"""
     bssid: str
@@ -63,6 +82,7 @@ class NetworkInfo:
     signal_strength: int = 0
     encryption: str = ""
     is_robot_network: bool = False
+    clients: List[ClientInfo] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization"""
@@ -72,7 +92,9 @@ class NetworkInfo:
             "channel": self.channel,
             "signal_strength": self.signal_strength,
             "encryption": self.encryption,
-            "is_robot_network": self.is_robot_network
+            "is_robot_network": self.is_robot_network,
+            "clients": [client.to_dict() for client in self.clients],
+            "client_count": len(self.clients)
         }
 
 
@@ -82,14 +104,17 @@ class JammerStatus:
     state: JammerState = JammerState.IDLE
     mode: Optional[JammerMode] = None
     target_bssid: Optional[str] = None
+    target_macs: List[str] = field(default_factory=list)
     channel: Optional[int] = None
     packets_sent: int = 0
     start_time: Optional[float] = None
     uptime_seconds: float = 0.0
     error_message: str = ""
     networks_discovered: int = 0
+    clients_discovered: int = 0
     robot_network_bssid: Optional[str] = None
     robot_network_essid: Optional[str] = None
+    robot_mac: Optional[str] = None
 
 
 class WifiJammer:
@@ -134,7 +159,9 @@ class WifiJammer:
         # Network protection
         self._robot_network_bssid: Optional[str] = None
         self._robot_network_essid: Optional[str] = None
+        self._robot_mac: Optional[str] = None
         self._protected_networks: set = set()
+        self._protected_macs: set = set()  # Protected MAC addresses (like robot's MAC)
 
         # Configuration
         self._default_packet_rate = 100  # packets per second
@@ -164,27 +191,31 @@ class WifiJammer:
                 "state": self._status.state.value,
                 "mode": self._status.mode.value if self._status.mode else None,
                 "target_bssid": self._status.target_bssid,
+                "target_macs": self._status.target_macs,
                 "channel": self._status.channel,
                 "packets_sent": self._status.packets_sent,
                 "uptime_seconds": round(self._status.uptime_seconds, 2),
                 "error_message": self._status.error_message,
                 "networks_discovered": self._status.networks_discovered,
+                "clients_discovered": self._status.clients_discovered,
                 "robot_network_bssid": self._status.robot_network_bssid,
-                "robot_network_essid": self._status.robot_network_essid
+                "robot_network_essid": self._status.robot_network_essid,
+                "robot_mac": self._status.robot_mac
             }
         return status_dict
 
     def get_robot_network(self) -> dict:
-        """Get information about the robot's own network"""
+        """Get information about the robot's own network and device"""
         self._detect_robot_network()
         return {
             "bssid": self._robot_network_bssid,
             "essid": self._robot_network_essid,
+            "mac": self._robot_mac,
             "interface": self.management_interface
         }
 
     def _detect_robot_network(self) -> None:
-        """Detect the network the robot is currently connected to"""
+        """Detect the network the robot is currently connected to and its MAC address"""
         try:
             result = subprocess.run(
                 ["iw", "dev", self.management_interface, "link"],
@@ -195,6 +226,7 @@ class WifiJammer:
 
             bssid = None
             essid = None
+            mac = None
 
             for line in result.stdout.splitlines():
                 line = line.strip()
@@ -202,17 +234,45 @@ class WifiJammer:
                     bssid = line.split("Connected to")[1].split()[0].strip().upper()
                 elif "SSID:" in line:
                     essid = line.split("SSID:")[1].strip().strip('"')
+                elif "tx bitrate" in line or "rx bitrate" in line:
+                    # MAC address is usually shown before bitrate info
+                    parts = line.split()
+                    for part in parts:
+                        if ":" in part and len(part) == 17:  # MAC format XX:XX:XX:XX:XX:XX
+                            mac = part.upper()
+                            break
+
+            # Try alternative method to get MAC address
+            if not mac:
+                try:
+                    mac_result = subprocess.run(
+                        ["ip", "link", "show", self.management_interface],
+                        capture_output=True,
+                        text=True,
+                        timeout=5
+                    )
+                    for line in mac_result.stdout.splitlines():
+                        if "link/ether" in line:
+                            mac = line.split("link/ether")[1].split()[0].strip().upper()
+                            break
+                except Exception:
+                    pass
 
             if bssid:
                 self._robot_network_bssid = bssid
                 self._robot_network_essid = essid
                 self._protected_networks.add(bssid)
 
+                if mac:
+                    self._robot_mac = mac
+                    self._protected_macs.add(mac)
+
                 with self._status_lock:
                     self._status.robot_network_bssid = bssid
                     self._status.robot_network_essid = essid
+                    self._status.robot_mac = mac
 
-                logger.info(f"Robot network detected - BSSID: {bssid}, ESSID: {essid}")
+                logger.info(f"Robot network detected - BSSID: {bssid}, ESSID: {essid}, MAC: {mac}")
             else:
                 logger.warning(f"No network detected on {self.management_interface}")
 
@@ -220,6 +280,30 @@ class WifiJammer:
             logger.error(f"Timeout detecting network on {self.management_interface}")
         except Exception as e:
             logger.error(f"Error detecting robot network: {e}")
+
+    def _discover_clients(self, bssid: str, channel: int) -> List[ClientInfo]:
+        """Discover clients connected to a specific access point"""
+        clients = []
+
+        try:
+            # Set channel for client discovery
+            self._set_channel(channel)
+
+            # Use airodump-ng or similar for client discovery
+            # For now, we'll use a simple approach with iw scan
+            # In a real implementation, you'd use airodump-ng or tshark
+
+            logger.debug(f"Discovering clients for AP {bssid} on channel {channel}")
+
+            # Placeholder for client discovery
+            # In production, you'd use tools like:
+            # - airodump-ng --bssid <bssid> -c <channel> <interface>
+            # - tshark -i <interface> -y IEEE802_11_RADIO
+
+        except Exception as e:
+            logger.error(f"Error discovering clients for {bssid}: {e}")
+
+        return clients
 
     def _set_monitor_mode(self) -> bool:
         """Set the WiFi interface to monitor mode"""
