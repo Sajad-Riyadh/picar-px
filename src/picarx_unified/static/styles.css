@@ -783,6 +783,10 @@ input[type="range"]::-moz-range-thumb {
   display: none;
 }
 
+.hidden {
+  display: none !important;
+}
+
 .panel-group,
 .mic-box,
 .auto-section,
@@ -1575,6 +1579,34 @@ select:focus {
 .mode-description small {
   color: var(--text);
   font-size: 12px;
+}
+
+.mass-options {
+  margin-top: 12px;
+  padding: 12px;
+  background: var(--surface-soft);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.checkbox-label input[type="checkbox"] {
+  cursor: pointer;
+}
+
+.option-note {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 11px;
 }
 
 .targeted-section {

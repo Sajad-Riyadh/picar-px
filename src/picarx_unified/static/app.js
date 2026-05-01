@@ -1827,6 +1827,8 @@ class WiFiJammerController {
       attackModeRadios: $$('input[name="attack-mode"]'),
       targetedSection: $("#targeted-input-section"),
       clientSection: $("#client-input-section"),
+      massOptions: $("#mass-options"),
+      enhancedMassDeauth: $("#enhanced-mass-deauth"),
       clientNetworkSelect: $("#client-network-select"),
       discoverClientsBtn: $("#discover-clients-btn"),
       clientList: $("#client-list"),
@@ -1838,6 +1840,7 @@ class WiFiJammerController {
     this.networks = [];
     this.selectedNetworks = new Set();
     this.selectedClients = new Set();
+    this.discoveredClients = {}; // Store discovered clients per network
     this.robotNetworkBssid = null;
     this.robotMac = null;
     this.isAttacking = false;
@@ -2034,13 +2037,17 @@ class WiFiJammerController {
     if (selectedMode === 'targeted') {
       this.dom.targetedSection.classList.remove('hidden');
       this.dom.clientSection.classList.add('hidden');
+      this.dom.massOptions.classList.add('hidden');
     } else if (selectedMode === 'client') {
       this.dom.targetedSection.classList.add('hidden');
       this.dom.clientSection.classList.remove('hidden');
+      this.dom.massOptions.classList.add('hidden');
       this.populateClientNetworkSelect();
     } else {
+      // Mass mode
       this.dom.targetedSection.classList.add('hidden');
       this.dom.clientSection.classList.add('hidden');
+      this.dom.massOptions.classList.remove('hidden');
     }
   }
 
@@ -2166,6 +2173,75 @@ class WiFiJammerController {
     });
   }
 
+  async discoverAllClientsForMassAttack(targetBssids) {
+    const allDiscoveredMacs = [];
+
+    for (const bssid of targetBssids) {
+      try {
+        // Find the network info to get the channel
+        const network = this.networks.find(n => n.bssid === bssid);
+        if (!network) continue;
+
+        const channel = network.channel;
+
+        console.log(`Discovering clients for network ${bssid} on channel ${channel}`);
+
+        const response = await fetch(`${ENDPOINTS.jammerDiscoverClients}?bssid=${bssid}&channel=${channel || ''}`);
+        const data = await response.json();
+
+        if (data.clients && Array.isArray(data.clients)) {
+          // Add all discovered MACs except the robot's MAC
+          const clientMacs = data.clients
+            .filter(client => !client.is_robot_device && client.mac !== this.robotMac)
+            .map(client => client.mac);
+
+          allDiscoveredMacs.push(...clientMacs);
+          console.log(`Discovered ${clientMacs.length} clients on network ${bssid}`);
+        }
+      } catch (error) {
+        console.error(`Failed to discover clients for network ${bssid}:`, error);
+      }
+    }
+
+    // Remove duplicates
+    const uniqueMacs = [...new Set(allDiscoveredMacs)];
+    console.log(`Total unique clients discovered: ${uniqueMacs.length}`);
+
+    return uniqueMacs;
+  }
+
+  prepareMassAttackConfig(selectedMode, targetBssids, targetMacs) {
+    let channel = null;
+
+    // Check if trying to attack robot's own network (for mass and targeted modes only)
+    // Client mode and enhanced mass mode allow attacking the robot's network but not the robot's device
+    const isEnhancedMass = selectedMode === 'mass' && targetMacs.length > 0;
+    if (this.robotNetworkBssid && targetBssids.includes(this.robotNetworkBssid) && selectedMode !== 'client' && !isEnhancedMass) {
+      alert('Cannot attack the robot\'s own network!');
+      return;
+    }
+
+    // Check if trying to attack robot's own device (for client mode and enhanced mass mode)
+    // This prevents attacking the robot itself even when attacking its network
+    if ((selectedMode === 'client' || isEnhancedMass) && this.robotMac && targetMacs.includes(this.robotMac)) {
+      alert('Cannot attack the robot\'s own device!');
+      return;
+    }
+
+    this.pendingAttackConfig = {
+      mode: selectedMode,
+      target_bssids: targetBssids,
+      target_macs: targetMacs,
+      channel: channel,
+      pps: parseInt(this.dom.packetRateSlider.value),
+      duration: parseInt(this.dom.durationSlider.value),
+    };
+
+    console.log('Pending attack config:', this.pendingAttackConfig);
+
+    this.dom.legalModal.hidden = false;
+  }
+
   showLegalWarning() {
     // Prepare attack configuration
     const selectedMode = document.querySelector('input[name="attack-mode"]:checked').value;
@@ -2185,6 +2261,24 @@ class WiFiJammerController {
         return;
       }
       targetBssids = Array.from(this.selectedNetworks);
+
+      // Check if enhanced mass deauth is enabled
+      if (this.dom.enhancedMassDeauth.checked) {
+        console.log('Enhanced Mass Deauth enabled - discovering clients on all selected networks');
+        this.discoverAllClientsForMassAttack(targetBssids).then(discoveredMacs => {
+          if (discoveredMacs.length > 0) {
+            targetMacs = discoveredMacs;
+            console.log('Discovered clients for mass attack:', targetMacs);
+          }
+          this.prepareMassAttackConfig(selectedMode, targetBssids, targetMacs);
+        });
+        return; // Return early, will continue in the callback
+      } else {
+        // Regular mass mode - use broadcast deauth
+        console.log('Regular Mass Deauth - using broadcast deauth');
+        this.prepareMassAttackConfig(selectedMode, targetBssids, targetMacs);
+        return;
+      }
     } else if (selectedMode === 'targeted') {
       const bssid = this.dom.targetBssidInput.value.trim();
       if (!bssid) {
