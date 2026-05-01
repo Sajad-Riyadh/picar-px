@@ -1,4 +1,11 @@
-from picarx_unified.attacks.wifi_jammer import WifiJammer
+import threading
+
+from picarx_unified.attacks.wifi_jammer import (
+    JammerMode,
+    JammerState,
+    JammerStatus,
+    WifiJammer,
+)
 
 
 def make_jammer():
@@ -33,3 +40,33 @@ BSS 04:95:e6:19:de:b1(on wlan1)
     assert networks[1].bssid == "04:95:E6:19:DE:B1"
     assert networks[1].channel == 1
     assert networks[1].signal_strength == -30
+
+
+def test_jamming_loop_clears_running_state_when_duration_expires(monkeypatch):
+    jammer = make_jammer()
+    jammer.monitor_interface = "wlan1"
+    jammer._stop_event = threading.Event()
+    jammer._status_lock = threading.Lock()
+    jammer._status = JammerStatus(
+        state=JammerState.RUNNING,
+        mode=JammerMode.MASS,
+        target_bssid="AA:BB:CC:DD:EE:FF",
+        channel=1,
+        start_time=0.0,
+    )
+    jammer._protected_networks = {"AA:BB:CC:DD:EE:FF"}
+    times = iter([0.0, 1.0])
+    monkeypatch.setattr("picarx_unified.attacks.wifi_jammer.time.time", lambda: next(times))
+    monkeypatch.setattr("picarx_unified.attacks.wifi_jammer.time.sleep", lambda _: None)
+
+    jammer._jamming_loop(
+        mode=JammerMode.MASS,
+        target_bssids=["AA:BB:CC:DD:EE:FF"],
+        channel=None,
+        packet_rate=100,
+        duration=0.1,
+    )
+
+    assert jammer._status.state == JammerState.IDLE
+    assert jammer._status.mode is None
+    assert jammer._status.target_bssid is None

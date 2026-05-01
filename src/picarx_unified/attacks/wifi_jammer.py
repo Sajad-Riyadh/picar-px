@@ -473,6 +473,16 @@ class WifiJammer:
             logger.error(f"Jamming loop error: {e}")
             self._update_status(state=JammerState.ERROR, error_message=str(e))
         finally:
+            if not self._stop_event.is_set():
+                with self._status_lock:
+                    if self._status.state == JammerState.RUNNING:
+                        if self._status.start_time:
+                            self._status.uptime_seconds = time.time() - self._status.start_time
+                        self._status.state = JammerState.IDLE
+                        self._status.mode = None
+                        self._status.target_bssid = None
+                        self._status.channel = None
+                        self._status.start_time = None
             logger.info("Jamming loop stopped")
 
     def start_attack(
