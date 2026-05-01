@@ -329,9 +329,17 @@ http://localhost:8080/
 
 This keeps the Pi serving the same app on the same port, but your browser sees the page as `localhost`. Modern browsers treat localhost as secure enough for `navigator.mediaDevices.getUserMedia()`, so the microphone can work even though the app itself is still using plain HTTP through the tunnel.
 
-### Optional HTTPS
+### HTTPS
 
-The app can serve HTTPS directly through Uvicorn when certificate files are configured. Create a local self-signed certificate for LAN testing:
+Fresh installs enable HTTPS automatically. The installer creates `certs/picarx.crt` and `certs/picarx.key` when they are missing, writes HTTPS defaults to `.env`, and the systemd service serves:
+
+```text
+https://picarx.local:8080/
+```
+
+Browsers will show a certificate warning unless the certificate is trusted. Choose the browser's advanced/proceed option for the self-signed local certificate, or replace the generated certificate with one from a trusted local CA.
+
+For existing installs or manual regeneration, create a local self-signed certificate:
 
 ```bash
 mkdir -p certs
@@ -355,8 +363,6 @@ Restart the app, then open:
 ```text
 https://picarx.local:8080/
 ```
-
-Browsers will show a certificate warning unless the certificate is trusted. For a smoother setup, use a trusted local CA tool such as `mkcert` if it is available on your development machine and Pi workflow.
 
 HTTPS is enabled only when `PICARX_HTTPS_ENABLE=true` and both certificate files exist. If the files are missing, the app stays on normal HTTP so existing IP access is not removed.
 
@@ -501,7 +507,7 @@ http://picarx.local:8080/
 
 Hostname access is friendlier than an IP address, but hostname alone does not guarantee microphone permission. A `.local` URL over plain HTTP may still be non-secure in the browser.
 
-Use optional HTTPS when you want microphone access without the SSH localhost tunnel:
+Fresh installs enable HTTPS automatically. For existing installs, or when you want to regenerate the local certificate, run:
 
 ```bash
 mkdir -p certs

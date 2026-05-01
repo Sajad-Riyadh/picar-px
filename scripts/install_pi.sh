@@ -145,6 +145,7 @@ install_system_packages() {
     espeak-ng \
     alsa-utils \
     avahi-daemon \
+    openssl \
     aircrack-ng
 
   if command -v systemctl >/dev/null 2>&1; then
@@ -230,9 +231,9 @@ ensure_env_defaults() {
   ensure_env_default "PICARX_PORT" "8080"
   ensure_env_default "PICARX_USE_MOCK" "false"
   ensure_env_default "PICARX_HARDWARE_INIT_MODE" "direct"
-  ensure_env_default "PICARX_HTTPS_ENABLE" "false"
-  ensure_env_default "PICARX_SSL_CERTFILE" ""
-  ensure_env_default "PICARX_SSL_KEYFILE" ""
+  ensure_env_default "PICARX_HTTPS_ENABLE" "true"
+  ensure_env_default "PICARX_SSL_CERTFILE" "certs/picarx.crt"
+  ensure_env_default "PICARX_SSL_KEYFILE" "certs/picarx.key"
 }
 
 load_env_file() {
@@ -262,6 +263,71 @@ load_env_file() {
       export "$key=$value"
     fi
   done < "$ENV_FILE"
+}
+
+absolute_path() {
+  local path="$1"
+  if [[ "$path" = /* ]]; then
+    printf '%s\n' "$path"
+  else
+    printf '%s/%s\n' "$PROJECT_DIR" "$path"
+  fi
+}
+
+ensure_https_certificate() {
+  local https_requested="${PICARX_HTTPS_ENABLE:-false}"
+  case "${https_requested,,}" in
+    1|true|yes|on) ;;
+    *) return ;;
+  esac
+
+  local certfile="${PICARX_SSL_CERTFILE:-certs/picarx.crt}"
+  local keyfile="${PICARX_SSL_KEYFILE:-certs/picarx.key}"
+  [[ -n "$certfile" && -n "$keyfile" ]] || return
+
+  certfile="$(absolute_path "$certfile")"
+  keyfile="$(absolute_path "$keyfile")"
+  if [[ -f "$certfile" && -f "$keyfile" ]]; then
+    return
+  fi
+
+  command -v openssl >/dev/null 2>&1 || fail "openssl is required to generate HTTPS certificates"
+
+  log "Generating self-signed HTTPS certificate"
+  run_root mkdir -p "$(dirname "$certfile")" "$(dirname "$keyfile")"
+
+  local host_name
+  host_name="$(hostname 2>/dev/null || printf 'picarx')"
+
+  local openssl_config
+  openssl_config="$(mktemp /tmp/picarx-unified-openssl-XXXXXX.cnf)"
+  cat > "$openssl_config" <<EOF
+[req]
+distinguished_name = dn
+x509_extensions = v3_req
+prompt = no
+
+[dn]
+CN = picarx.local
+
+[v3_req]
+subjectAltName = @alt_names
+
+[alt_names]
+DNS.1 = picarx.local
+DNS.2 = $host_name
+DNS.3 = ${host_name}.local
+IP.1 = 127.0.0.1
+EOF
+
+  run_root openssl req -x509 -newkey rsa:2048 -nodes \
+    -keyout "$keyfile" \
+    -out "$certfile" \
+    -days 365 \
+    -config "$openssl_config" >/dev/null 2>&1
+  rm -f "$openssl_config"
+  run_root chmod 600 "$keyfile"
+  run_root chmod 644 "$certfile"
 }
 
 ensure_hostname_resolution() {
@@ -319,6 +385,7 @@ prepare_runtime_env() {
   ensure_env_file
   ensure_env_defaults
   load_env_file
+  ensure_https_certificate
 
   export PICARX_HOST="${HOST_OVERRIDE:-${PICARX_HOST:-0.0.0.0}}"
   export PICARX_PORT="${PORT_OVERRIDE:-${PICARX_PORT:-8080}}"
@@ -337,7 +404,11 @@ run_application() {
   source "$VENV_DIR/bin/activate"
   prepare_runtime_env
 
-  log "Starting PiCar-X Unified on http://${PICARX_HOST}:${PICARX_PORT}"
+  local scheme="http"
+  case "${PICARX_HTTPS_ENABLE:-false}" in
+    1|true|yes|on) scheme="https" ;;
+  esac
+  log "Starting PiCar-X Unified on ${scheme}://${PICARX_HOST}:${PICARX_PORT}"
   if (( MOCK_MODE )); then
     log "Mock mode is enabled"
   fi
