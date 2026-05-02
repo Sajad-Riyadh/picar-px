@@ -1908,13 +1908,15 @@ class WiFiJammerController {
       const response = await fetch(`${ENDPOINTS.jammerScan}?duration=10`);
       const data = await response.json();
 
-      if (data.networks && Array.isArray(data.networks)) {
+      if (data.networks && Array.isArray(data.networks) && data.networks.length > 0) {
         this.networks = data.networks;
+        this._lastScanHint = null;
         this.renderNetworkList();
         this.populateClientNetworkSelect();
       } else {
-        this.dom.networkList.innerHTML = '<div class="network-placeholder">No networks found</div>';
         this.networks = [];
+        this._lastScanHint = data.hint || null;
+        this.renderNetworkList();
         this.populateClientNetworkSelect();
       }
 
@@ -1955,7 +1957,11 @@ class WiFiJammerController {
 
   renderNetworkList() {
     if (this.networks.length === 0) {
-      this.dom.networkList.innerHTML = '<div class="network-placeholder">No networks found</div>';
+      const hint = this._lastScanHint
+        ? `<pre class="network-hint">${this._lastScanHint}</pre>`
+        : '';
+      this.dom.networkList.innerHTML =
+        `<div class="network-placeholder">No networks found</div>${hint}`;
       return;
     }
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager
 from typing import Annotated
 
@@ -191,7 +192,25 @@ def create_app() -> FastAPI:
         """Scan for nearby WiFi networks"""
         try:
             networks = request.app.state.wifi_jammer.scan_networks(duration=duration)
-            return {"networks": networks, "count": len(networks)}
+            hint = None
+            if not networks:
+                # Detect systemd service environment (INVOCATION_ID is set by systemd)
+                is_systemd = bool(os.environ.get("INVOCATION_ID") or os.environ.get("JOURNAL_STREAM"))
+                if is_systemd:
+                    hint = (
+                        "Running as a systemd service can prevent monitor mode. "
+                        "Stop the service and run directly instead:\n"
+                        "  sudo systemctl stop picarx-unified.service\n"
+                        "  source /root/picar-px/.venv/bin/activate\n"
+                        "  python -m picarx_unified"
+                    )
+                else:
+                    hint = (
+                        "No networks found. Ensure wlan1 is available, "
+                        "aircrack-ng is installed (sudo apt-get install aircrack-ng), "
+                        "and no other process is holding the interface."
+                    )
+            return {"networks": networks, "count": len(networks), "hint": hint}
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
 
