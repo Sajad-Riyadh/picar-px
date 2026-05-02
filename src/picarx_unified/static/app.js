@@ -2080,10 +2080,15 @@ class WiFiJammerController {
 
     try {
       this.dom.discoverClientsBtn.disabled = true;
-      this.dom.discoverClientsBtn.textContent = 'Discovering...';
-      this.dom.clientList.innerHTML = '<div class="network-placeholder">Discovering clients...</div>';
+      this.dom.discoverClientsBtn.textContent = 'Listening...';
+      this.dom.clientList.innerHTML = '<div class="network-placeholder">Listening for client traffic...</div>';
 
-      const response = await fetch(`${ENDPOINTS.jammerDiscoverClients}?bssid=${selectedBssid}&channel=${channel || ''}`);
+      const params = new URLSearchParams({
+        bssid: selectedBssid,
+        channel: channel || '',
+        duration: '25',
+      });
+      const response = await fetch(`${ENDPOINTS.jammerDiscoverClients}?${params.toString()}`);
       const data = await response.json();
 
       if (data.clients && Array.isArray(data.clients)) {
@@ -2103,7 +2108,7 @@ class WiFiJammerController {
 
   renderClientList(clients) {
     if (clients.length === 0) {
-      this.dom.clientList.innerHTML = '<div class="network-placeholder">No clients found on this network</div>';
+      this.dom.clientList.innerHTML = '<div class="network-placeholder">No client traffic observed. Keep a device active and try again.</div>';
       return;
     }
 

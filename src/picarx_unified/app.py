@@ -193,10 +193,10 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=500, detail=str(e))
 
     @app.get("/api/jammer/discover_clients")
-    async def jammer_discover_clients(request: Request, bssid: str, channel: int):
+    async def jammer_discover_clients(request: Request, bssid: str, channel: int, duration: int = 25):
         """Discover clients on a specific network"""
         try:
-            clients = request.app.state.wifi_jammer.discover_network_clients(bssid, channel)
+            clients = request.app.state.wifi_jammer.discover_network_clients(bssid, channel, duration=duration)
             return {"clients": clients, "count": len(clients), "bssid": bssid}
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))

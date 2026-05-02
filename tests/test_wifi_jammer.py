@@ -12,6 +12,7 @@ def make_jammer():
     jammer = WifiJammer.__new__(WifiJammer)
     jammer._robot_network_bssid = None
     jammer._robot_network_essid = None
+    jammer._robot_mac = "2C:CF:67:36:9B:35"
     return jammer
 
 
@@ -100,3 +101,28 @@ def test_jamming_loop_stops_after_repeated_send_errors(monkeypatch):
     assert jammer._stop_event.is_set()
     assert jammer._status.state == JammerState.ERROR
     assert "repeated send errors" in jammer._status.error_message
+
+
+def test_parse_airodump_client_csv_station_section():
+    lines = [
+        "BSSID, First time seen, Last time seen, channel, Speed, Privacy, Cipher, Authentication, Power, # beacons, # IV, LAN IP, ID-length, ESSID, Key\n",
+        "04:95:E6:19:DE:B1, 2026-05-02 03:08:00, 2026-05-02 03:08:24, 1, 270, WPA2, CCMP, PSK, -39, 233, 9985, 0. 0. 0. 0, 2, SS,\n",
+        "\n",
+        "Station MAC, First time seen, Last time seen, Power, # packets, BSSID, Probed ESSIDs\n",
+        "\n",
+        "7E:14:F4:E1:E8:28, 2026-05-02 03:08:01, 2026-05-02 03:08:24, -85, 13, 04:95:E6:19:DE:B1,\n",
+        "0E:17:D9:91:43:EC, 2026-05-02 03:08:01, 2026-05-02 03:08:24, -36, 6, 04:95:E6:19:DE:B1,\n",
+        "2C:CF:67:36:9B:35, 2026-05-02 03:08:01, 2026-05-02 03:08:24, -30, 9949, 04:95:E6:19:DE:B1,\n",
+        "AA:BB:CC:DD:EE:FF, 2026-05-02 03:08:01, 2026-05-02 03:08:24, -10, 4, 74:DA:88:BF:10:A2,\n",
+        "22:33:44:55:66:77, 2026-05-02 03:08:01, 2026-05-02 03:08:24, -10, 4, (not associated), phone\n",
+    ]
+
+    clients = make_jammer()._parse_airodump_client_lines(lines, "04:95:E6:19:DE:B1")
+
+    assert [client.mac for client in clients] == [
+        "7E:14:F4:E1:E8:28",
+        "0E:17:D9:91:43:EC",
+        "2C:CF:67:36:9B:35",
+    ]
+    assert [client.signal_strength for client in clients] == [-85, -36, -30]
+    assert clients[2].is_robot_device is True

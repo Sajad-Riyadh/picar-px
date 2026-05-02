@@ -18,6 +18,7 @@ Technical Implementation:
 - Runs in isolated thread to avoid blocking robot control
 """
 
+import csv
 import logging
 import os
 import re
@@ -306,7 +307,73 @@ class WifiJammer:
         except Exception as e:
             logger.error(f"Error detecting robot network: {e}")
 
-    def _discover_clients(self, bssid: str, channel: int) -> List[ClientInfo]:
+    @staticmethod
+    def _is_mac_address(value: str) -> bool:
+        """Return True when the value looks like a Wi-Fi MAC address."""
+        return bool(re.match(r'^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$', value.strip()))
+
+    @staticmethod
+    def _normalise_mac(value: Optional[str]) -> str:
+        return value.strip().upper() if value else ""
+
+    def _parse_airodump_client_lines(self, lines: List[str], bssid: str) -> List[ClientInfo]:
+        """Parse the Station MAC section from airodump-ng CSV output."""
+        clients: List[ClientInfo] = []
+        target_bssid = self._normalise_mac(bssid)
+        robot_mac = self._normalise_mac(self._robot_mac)
+        station_columns: Optional[Dict[str, int]] = None
+
+        for row in csv.reader(lines, skipinitialspace=True):
+            if not row or not any(cell.strip() for cell in row):
+                continue
+
+            first_cell = row[0].strip()
+            if first_cell == "Station MAC":
+                station_columns = {
+                    cell.strip().lower(): index
+                    for index, cell in enumerate(row)
+                    if cell.strip()
+                }
+                continue
+
+            if station_columns is None:
+                continue
+
+            mac_index = station_columns.get("station mac", 0)
+            bssid_index = station_columns.get("bssid")
+            power_index = station_columns.get("power")
+
+            if len(row) <= mac_index:
+                continue
+
+            mac = self._normalise_mac(row[mac_index])
+            if not self._is_mac_address(mac) or mac == target_bssid:
+                continue
+
+            if bssid_index is not None and len(row) > bssid_index:
+                client_bssid = self._normalise_mac(row[bssid_index])
+                if self._is_mac_address(client_bssid) and client_bssid != target_bssid:
+                    continue
+                if client_bssid in {"(NOT ASSOCIATED)", "NOT-ASSOCIATED"}:
+                    continue
+
+            signal = 0
+            if power_index is not None and len(row) > power_index:
+                try:
+                    signal = int(float(row[power_index].strip()))
+                except ValueError:
+                    signal = 0
+
+            clients.append(ClientInfo(
+                mac=mac,
+                bssid=target_bssid,
+                signal_strength=signal,
+                is_robot_device=mac == robot_mac
+            ))
+
+        return clients
+
+    def _discover_clients(self, bssid: str, channel: int, duration: int = 25) -> List[ClientInfo]:
         """Discover clients connected to a specific access point using airodump-ng"""
         clients = []
         temp_file = f"/tmp/airodump_clients_{uuid.uuid4().hex[:8]}"
@@ -320,8 +387,7 @@ class WifiJammer:
 
             logger.debug(f"Discovering clients for AP {bssid} on channel {channel} using airodump-ng")
 
-            # Use airodump-ng to discover clients
-            # Run for 10 seconds to capture client information
+            # Use airodump-ng to passively discover clients.
             cmd = [
                 "sudo", "airodump-ng",
                 "--bssid", bssid,
@@ -338,9 +404,9 @@ class WifiJammer:
                 text=True
             )
 
-            # Let it run for 10 seconds to capture clients
+            # Let it run long enough to observe normal client traffic.
             try:
-                process.wait(timeout=10)
+                process.wait(timeout=duration)
             except subprocess.TimeoutExpired:
                 process.terminate()
                 try:
@@ -355,41 +421,7 @@ class WifiJammer:
                     with open(csv_file, 'r') as f:
                         lines = f.readlines()
 
-                    # Find the station section (starts with "Station MAC")
-                    station_section = False
-                    for line in lines:
-                        line = line.strip()
-                        if line.startswith("Station MAC"):
-                            station_section = True
-                            continue
-
-                        if station_section:
-                            if not line:  # Empty line marks end of section
-                                break
-
-                            parts = line.split(',')
-                            if len(parts) >= 1:
-                                mac = parts[0].strip().upper()
-                                # Filter out invalid MACs and the BSSID itself
-                                if mac and mac != "Not-Associated" and mac != bssid:
-                                    # Validate MAC format
-                                    if re.match(r'^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$', mac):
-                                        # Check if this is the robot's MAC
-                                        is_robot = mac == self._robot_mac
-                                        # Get signal strength if available
-                                        signal = 0
-                                        if len(parts) >= 6:
-                                            try:
-                                                signal = int(parts[5].strip())
-                                            except (ValueError, IndexError):
-                                                pass
-
-                                        clients.append(ClientInfo(
-                                            mac=mac,
-                                            bssid=bssid,
-                                            signal_strength=signal,
-                                            is_robot_device=is_robot
-                                        ))
+                    clients = self._parse_airodump_client_lines(lines, bssid)
 
                 except Exception as e:
                     logger.error(f"Error parsing airodump-ng output: {e}")
@@ -413,7 +445,7 @@ class WifiJammer:
 
         return clients
 
-    def discover_network_clients(self, bssid: str, channel: int) -> List[dict]:
+    def discover_network_clients(self, bssid: str, channel: int, duration: int = 25) -> List[dict]:
         """
         Discover clients on a specific network
 
@@ -431,7 +463,8 @@ class WifiJammer:
         self._update_status(state=JammerState.SCANNING)
 
         try:
-            clients = self._discover_clients(bssid, channel)
+            duration = max(5, min(int(duration), 60))
+            clients = self._discover_clients(bssid, channel, duration=duration)
 
             with self._status_lock:
                 self._status.clients_discovered = len(clients)
