@@ -2083,12 +2083,17 @@ class WiFiJammerController {
       this.dom.discoverClientsBtn.textContent = 'Listening...';
       this.dom.clientList.innerHTML = '<div class="network-placeholder">Listening for client traffic...</div>';
 
-      const params = new URLSearchParams({
-        bssid: selectedBssid,
-        channel: channel || '',
-        duration: '25',
+      const response = await fetch(ENDPOINTS.jammerDiscoverClients, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          bssid: selectedBssid,
+          channel: channel || '',
+          duration: 25,
+        }),
       });
-      const response = await fetch(`${ENDPOINTS.jammerDiscoverClients}?${params.toString()}`);
       const data = await response.json();
 
       if (data.clients && Array.isArray(data.clients)) {
@@ -2194,7 +2199,17 @@ class WiFiJammerController {
 
         console.log(`Discovering clients for network ${bssid} on channel ${channel}`);
 
-        const response = await fetch(`${ENDPOINTS.jammerDiscoverClients}?bssid=${bssid}&channel=${channel || ''}`);
+        const response = await fetch(ENDPOINTS.jammerDiscoverClients, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            bssid: bssid,
+            channel: channel || '',
+            duration: 25,
+          }),
+        });
         const data = await response.json();
 
         if (data.clients && Array.isArray(data.clients)) {
