@@ -392,7 +392,29 @@ class WifiJammer:
                 self._set_managed_mode()
                 return clients
 
+            # Verify channel was actually set and allow it to stabilize
+            verify_result = subprocess.run(
+                ["iw", "dev", self.monitor_interface, "info"],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            logger.info(f"Interface state before airodump-ng: {verify_result.stdout}")
+            time.sleep(0.5)  # Allow channel to stabilize before starting airodump-ng
+
             logger.debug(f"Discovering clients for AP {bssid} on channel {channel} using airodump-ng")
+
+            # Verify airodump-ng is in PATH
+            which_result = subprocess.run(
+                ["which", "airodump-ng"],
+                capture_output=True,
+                text=True,
+                timeout=2
+            )
+            logger.info(f"airodump-ng location: {which_result.stdout.strip()}")
+            if which_result.returncode != 0:
+                logger.error("airodump-ng not found in PATH")
+                return clients
 
             # Use airodump-ng to passively discover clients.
             cmd = [
@@ -400,6 +422,7 @@ class WifiJammer:
                 "--bssid", bssid,
                 "-c", str(channel),
                 "--output-format", "csv",
+                "--write-interval", "1",
                 "-w", temp_file,
                 self.monitor_interface
             ]
@@ -408,7 +431,7 @@ class WifiJammer:
 
             process = subprocess.Popen(
                 cmd,
-                stdout=subprocess.PIPE,
+                stdout=subprocess.DEVNULL,  # never read; avoid pipe-buffer deadlock under systemd
                 stderr=subprocess.PIPE,
                 text=True
             )
@@ -430,18 +453,41 @@ class WifiJammer:
                         logger.error("airodump-ng process could not be killed")
                         pass
 
-            # Check if process had any errors
-            if process.stderr:
+            # Log airodump-ng exit status and any stderr output so failures
+            # are visible in the systemd journal instead of silently returning
+            # an empty client list.
+            exit_code = process.returncode
+            stderr_output = ""
+            try:
                 stderr_output = process.stderr.read()
-                if stderr_output and "command not found" in stderr_output:
-                    logger.error("airodump-ng not found in PATH")
-                    return clients
-                elif stderr_output:
-                    logger.debug(f"airodump-ng stderr: {stderr_output}")
+            except Exception:
+                pass
+            if "command not found" in stderr_output:
+                logger.error("airodump-ng not found in PATH")
+                return clients
+            # SIGTERM (-15) and SIGKILL (-9) are expected termination signals
+            if exit_code not in (0, None, -15, -9):
+                logger.warning(
+                    "airodump-ng exited with unexpected code %d: %s",
+                    exit_code,
+                    stderr_output.strip()[:300],
+                )
+            elif stderr_output.strip():
+                logger.debug("airodump-ng stderr: %s", stderr_output.strip()[:300])
+
+            # Verify what files were actually created
+            import glob
+            csv_files = glob.glob(f"{temp_file}*")
+            logger.info(f"Files created by airodump-ng: {csv_files}")
 
             # Parse the CSV output for client information
             csv_file = f"{temp_file}-01.csv"
             if os.path.exists(csv_file):
+                # Log CSV file content for debugging
+                with open(csv_file, 'r') as f:
+                    content = f.read()
+                logger.debug(f"CSV file content (first 500 chars):\n{content[:500]}")
+
                 try:
                     with open(csv_file, 'r') as f:
                         lines = f.readlines()
@@ -525,6 +571,19 @@ class WifiJammer:
         try:
             logger.info(f"Setting {self.monitor_interface} to monitor mode...")
 
+            # Release the interface from NetworkManager / wpa_supplicant so they
+            # do not fight us while we are in monitor mode.  Both calls are
+            # best-effort; errors are ignored when the tools are absent.
+            for _release_cmd in [
+                ["nmcli", "device", "set", self.monitor_interface, "managed", "no"],
+                ["pkill", "-f", f"wpa_supplicant.*{re.escape(self.monitor_interface)}"],
+            ]:
+                try:
+                    subprocess.run(_release_cmd, capture_output=True, timeout=3)
+                except Exception:
+                    pass
+            time.sleep(0.3)  # let NM/wpa_supplicant notice before we take the interface down
+
             # Bring interface down
             result = subprocess.run(
                 ["ip", "link", "set", self.monitor_interface, "down"],
@@ -551,6 +610,7 @@ class WifiJammer:
                 timeout=10
             )
             logger.debug(f"Interface {self.monitor_interface} brought up")
+            time.sleep(0.5)  # allow the driver to complete mode transition
 
             # Verify monitor mode
             verify_result = subprocess.run(
@@ -608,6 +668,16 @@ class WifiJammer:
                 timeout=5
             )
             logger.debug(f"Interface {self.monitor_interface} brought up")
+
+            # Re-hand the interface back to NetworkManager so it can reconnect.
+            try:
+                subprocess.run(
+                    ["nmcli", "device", "set", self.monitor_interface, "managed", "yes"],
+                    capture_output=True,
+                    timeout=3,
+                )
+            except Exception:
+                pass
 
             logger.info(f"Successfully reset {self.monitor_interface} to managed mode")
             return True
@@ -679,20 +749,24 @@ class WifiJammer:
             logger.info(f"Starting network scan on {self.monitor_interface} using airodump-ng...")
 
             # Set monitor mode for scanning
-            self._set_monitor_mode()
+            if not self._set_monitor_mode():
+                logger.error("Failed to set monitor mode for scanning")
+                self._update_status(state=JammerState.ERROR, error_message="Failed to set monitor mode")
+                return []
 
             # Use airodump-ng for comprehensive network scanning
             temp_file = f"/tmp/airodump_scan_{uuid.uuid4().hex[:8]}"
             cmd = [
                 "airodump-ng",
                 "--output-format", "csv",
+                "--write-interval", "1",
                 "-w", temp_file,
                 self.monitor_interface
             ]
 
             process = subprocess.Popen(
                 cmd,
-                stdout=subprocess.PIPE,
+                stdout=subprocess.DEVNULL,  # never read; avoid pipe-buffer deadlock under systemd
                 stderr=subprocess.PIPE,
                 text=True
             )
@@ -731,17 +805,16 @@ class WifiJammer:
                                     if not essid:
                                         essid = "(Hidden)"
 
-                                    # Get channel from frequency if available
+                                    # airodump-ng CSV column 3 is the channel
+                                    # number directly (e.g. 1, 6, 11) – NOT a
+                                    # frequency.  Treating it as a frequency
+                                    # caused every network to be reported as
+                                    # channel 1, making client discovery lock
+                                    # onto the wrong channel.
                                     channel = 1
                                     if len(parts) > 3:
                                         try:
-                                            freq = int(parts[3].strip())
-                                            # Convert frequency to channel (2.4 GHz)
-                                            if 2400 <= freq <= 2500:
-                                                channel = (freq - 2407) // 5
-                                            # 5 GHz channels
-                                            elif 5000 <= freq <= 6000:
-                                                channel = (freq - 5000) // 5
+                                            channel = int(parts[3].strip())
                                         except (ValueError, IndexError):
                                             pass
 
