@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from contextlib import asynccontextmanager
 from typing import Annotated
 
@@ -16,6 +17,8 @@ from .runtime import RobotRuntime
 from .safety import SafetyViolation
 from .voice import VoiceConnection
 from .attacks.wifi_jammer import WifiJammer, JammerMode
+
+logger = logging.getLogger(__name__)
 
 def _authorize(request: Request, authorization: Annotated[str | None, Header()] = None) -> None:
     token = request.app.state.runtime.config.api_token
@@ -192,13 +195,23 @@ def create_app() -> FastAPI:
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
 
-    @app.get("/api/jammer/discover_clients")
-    async def jammer_discover_clients(request: Request, bssid: str, channel: int, duration: int = 25):
+    @app.post("/api/jammer/discover_clients")
+    async def jammer_discover_clients(request: Request, body: dict):
         """Discover clients on a specific network"""
         try:
+            bssid = body.get("bssid")
+            channel = body.get("channel")
+            duration = body.get("duration", 25)
+
+            if not bssid or not channel:
+                raise HTTPException(status_code=400, detail="bssid and channel are required")
+
             clients = request.app.state.wifi_jammer.discover_network_clients(bssid, channel, duration=duration)
             return {"clients": clients, "count": len(clients), "bssid": bssid}
+        except HTTPException:
+            raise
         except Exception as e:
+            logger.error(f"Error discovering clients: {e}")
             raise HTTPException(status_code=500, detail=str(e))
 
     @app.post("/api/jammer/start")

@@ -379,11 +379,18 @@ class WifiJammer:
         temp_file = f"/tmp/airodump_clients_{uuid.uuid4().hex[:8]}"
 
         try:
+            logger.info(f"Starting client discovery for BSSID {bssid} on channel {channel}")
+
             # airodump-ng needs monitor mode for passive station discovery.
-            self._set_monitor_mode()
+            if not self._set_monitor_mode():
+                logger.error("Failed to set monitor mode, cannot discover clients")
+                return clients
 
             # Set channel for client discovery
-            self._set_channel(channel)
+            if not self._set_channel(channel):
+                logger.error(f"Failed to set channel {channel}, cannot discover clients")
+                self._set_managed_mode()
+                return clients
 
             logger.debug(f"Discovering clients for AP {bssid} on channel {channel} using airodump-ng")
 
@@ -397,6 +404,8 @@ class WifiJammer:
                 self.monitor_interface
             ]
 
+            logger.debug(f"Running command: {' '.join(cmd)}")
+
             process = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
@@ -408,11 +417,27 @@ class WifiJammer:
             try:
                 process.wait(timeout=duration)
             except subprocess.TimeoutExpired:
+                logger.debug(f"Client discovery timeout after {duration}s, terminating airodump-ng")
                 process.terminate()
                 try:
-                    process.wait(timeout=2)
+                    process.wait(timeout=5)
                 except subprocess.TimeoutExpired:
+                    logger.warning("airodump-ng did not terminate gracefully, killing")
                     process.kill()
+                    try:
+                        process.wait(timeout=2)
+                    except subprocess.TimeoutExpired:
+                        logger.error("airodump-ng process could not be killed")
+                        pass
+
+            # Check if process had any errors
+            if process.stderr:
+                stderr_output = process.stderr.read()
+                if stderr_output and "command not found" in stderr_output:
+                    logger.error("airodump-ng not found in PATH")
+                    return clients
+                elif stderr_output:
+                    logger.debug(f"airodump-ng stderr: {stderr_output}")
 
             # Parse the CSV output for client information
             csv_file = f"{temp_file}-01.csv"
@@ -421,10 +446,13 @@ class WifiJammer:
                     with open(csv_file, 'r') as f:
                         lines = f.readlines()
 
+                    logger.debug(f"Read {len(lines)} lines from CSV file")
                     clients = self._parse_airodump_client_lines(lines, bssid)
 
                 except Exception as e:
                     logger.error(f"Error parsing airodump-ng output: {e}")
+                    import traceback
+                    logger.error(traceback.format_exc())
 
                 # Clean up temporary files
                 try:
@@ -432,8 +460,11 @@ class WifiJammer:
                         temp_path = f"{temp_file}{ext}"
                         if os.path.exists(temp_path):
                             os.remove(temp_path)
+                            logger.debug(f"Cleaned up {temp_path}")
                 except Exception as e:
                     logger.debug(f"Error cleaning up temp files: {e}")
+            else:
+                logger.warning(f"CSV file not found: {csv_file}")
 
             logger.info(f"Discovered {len(clients)} clients for AP {bssid}")
 
@@ -442,6 +473,14 @@ class WifiJammer:
             logger.error("  sudo apt-get install aircrack-ng")
         except Exception as e:
             logger.error(f"Error discovering clients for {bssid}: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+        finally:
+            # Always try to reset to managed mode
+            try:
+                self._set_managed_mode()
+            except Exception as e:
+                logger.error(f"Error resetting to managed mode: {e}")
 
         return clients
 
@@ -487,84 +526,136 @@ class WifiJammer:
             logger.info(f"Setting {self.monitor_interface} to monitor mode...")
 
             # Bring interface down
-            subprocess.run(
+            result = subprocess.run(
                 ["ip", "link", "set", self.monitor_interface, "down"],
                 check=True,
                 capture_output=True,
                 timeout=10
             )
+            logger.debug(f"Interface {self.monitor_interface} brought down")
 
             # Set monitor mode
-            subprocess.run(
+            result = subprocess.run(
                 ["iw", "dev", self.monitor_interface, "set", "type", "monitor"],
                 check=True,
                 capture_output=True,
                 timeout=10
             )
+            logger.debug(f"Interface {self.monitor_interface} set to monitor mode")
 
             # Bring interface up
-            subprocess.run(
+            result = subprocess.run(
                 ["ip", "link", "set", self.monitor_interface, "up"],
                 check=True,
                 capture_output=True,
                 timeout=10
             )
+            logger.debug(f"Interface {self.monitor_interface} brought up")
 
-            logger.info(f"Successfully set {self.monitor_interface} to monitor mode")
-            return True
+            # Verify monitor mode
+            verify_result = subprocess.run(
+                ["iw", "dev", self.monitor_interface, "info"],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            if "type monitor" in verify_result.stdout:
+                logger.info(f"Successfully set {self.monitor_interface} to monitor mode")
+                return True
+            else:
+                logger.error(f"Failed to verify monitor mode: {verify_result.stdout}")
+                return False
 
         except subprocess.CalledProcessError as e:
             logger.error(f"Failed to set monitor mode: {e}")
+            logger.error(f"stderr: {e.stderr}")
             self._update_status(state=JammerState.ERROR, error_message=str(e))
             return False
         except subprocess.TimeoutExpired:
             logger.error("Timeout setting monitor mode")
             self._update_status(state=JammerState.ERROR, error_message="Timeout setting monitor mode")
             return False
+        except Exception as e:
+            logger.error(f"Unexpected error setting monitor mode: {e}")
+            self._update_status(state=JammerState.ERROR, error_message=str(e))
+            return False
 
     def _set_managed_mode(self) -> bool:
         """Set the WiFi interface back to managed mode for normal scans."""
         try:
+            logger.info(f"Resetting {self.monitor_interface} to managed mode...")
+
             subprocess.run(
                 ["ip", "link", "set", self.monitor_interface, "down"],
                 check=True,
                 capture_output=True,
                 timeout=5
             )
+            logger.debug(f"Interface {self.monitor_interface} brought down")
+
             subprocess.run(
                 ["iw", "dev", self.monitor_interface, "set", "type", "managed"],
                 check=True,
                 capture_output=True,
                 timeout=5
             )
+            logger.debug(f"Interface {self.monitor_interface} set to managed mode")
+
             subprocess.run(
                 ["ip", "link", "set", self.monitor_interface, "up"],
                 check=True,
                 capture_output=True,
                 timeout=5
             )
-            logger.info(f"Reset {self.monitor_interface} to managed mode")
+            logger.debug(f"Interface {self.monitor_interface} brought up")
+
+            logger.info(f"Successfully reset {self.monitor_interface} to managed mode")
             return True
         except subprocess.CalledProcessError as e:
             logger.error(f"Failed to set managed mode: {e}")
+            logger.error(f"stderr: {e.stderr}")
             return False
         except subprocess.TimeoutExpired:
             logger.error("Timeout setting managed mode")
+            return False
+        except Exception as e:
+            logger.error(f"Unexpected error setting managed mode: {e}")
             return False
 
     def _set_channel(self, channel: int) -> bool:
         """Set the WiFi channel"""
         try:
-            subprocess.run(
+            result = subprocess.run(
                 ["iw", "dev", self.monitor_interface, "set", "channel", str(channel)],
                 check=True,
                 capture_output=True,
                 timeout=5
             )
             logger.debug(f"Set channel to {channel}")
-            return True
+
+            # Verify channel was set
+            verify_result = subprocess.run(
+                ["iw", "dev", self.monitor_interface, "info"],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            if f"channel {channel}" in verify_result.stdout:
+                logger.info(f"Successfully set channel to {channel}")
+                return True
+            else:
+                logger.warning(f"Channel verification failed. Current state: {verify_result.stdout}")
+                return True  # Still return true as the command succeeded
+
         except subprocess.CalledProcessError as e:
             logger.error(f"Failed to set channel {channel}: {e}")
+            logger.error(f"stderr: {e.stderr}")
+            return False
+        except subprocess.TimeoutExpired:
+            logger.error(f"Timeout setting channel {channel}")
+            return False
+        except Exception as e:
+            logger.error(f"Unexpected error setting channel {channel}: {e}")
             return False
 
     def scan_networks(self, duration: int = 10) -> List[dict]:
