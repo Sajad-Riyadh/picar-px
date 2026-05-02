@@ -1,5 +1,53 @@
 # PiCar-X Unified
 
+## Quick Installation
+
+On a fresh Raspberry Pi 5, run this one command:
+
+```bash
+bash scripts/install_pi.sh
+```
+
+This will:
+1. Install all required system packages (including aircrack-ng for WiFi features)
+2. Install the SunFounder PiCar-X Python stack
+3. Create a Python virtual environment
+4. Set up the systemd service with all necessary permissions
+5. Start the application
+
+The service will be automatically enabled and started. Access the web interface at `http://<your-pi-ip>:8080`.
+
+### Installation Options
+
+```bash
+# Install only (don't start the app)
+bash scripts/install_pi.sh --install-only
+
+# Start as systemd service instead of foreground
+bash scripts/install_pi.sh --service
+
+# Run in mock mode (no hardware required)
+bash scripts/install_pi.sh --mock
+
+# Skip SunFounder stack installation
+bash scripts/install_pi.sh --skip-sunfounder
+```
+
+### Manual Service Management
+
+```bash
+# Check service status
+sudo systemctl status picarx-unified.service
+
+# Start/stop/restart service
+sudo systemctl start picarx-unified.service
+sudo systemctl stop picarx-unified.service
+sudo systemctl restart picarx-unified.service
+
+# View logs
+sudo journalctl -u picarx-unified.service -f
+```
+
 ## 1. Architecture overview
 
 This project is a unified control stack for a SunFounder PiCar-X running on a Raspberry Pi 5. It stays compatible with the official `picarx.Picarx` hardware API while keeping the robot software split into clear service boundaries: safety-first orchestration, browser-accessible control APIs, camera and vision services, and a voice loop that remains separate from low-level hardware control.
@@ -88,6 +136,9 @@ Picar-px/
         ├── state.py
         ├── vision.py
         ├── voice.py
+        ├── attacks/
+        │   ├── __init__.py
+        │   └── wifi_jammer.py
         ├── hardware/
         │   ├── __init__.py
         │   ├── camera.py

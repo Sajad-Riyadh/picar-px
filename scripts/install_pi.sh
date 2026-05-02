@@ -365,6 +365,20 @@ Environment=HOME=/root
 Environment=USER=root
 Environment=LOGNAME=root
 Environment=PYTHONUNBUFFERED=1
+# Allow write access to project and PiCar-X config directories
+ProtectSystem=false
+ProtectHome=false
+ReadWritePaths=$PROJECT_DIR /opt/picar-x
+# Add network capabilities for WiFi monitor mode and packet capture
+CapabilityBoundingSet=CAP_NET_RAW CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_SYS_RAWIO
+AmbientCapabilities=CAP_NET_RAW CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_SYS_RAWIO
+# Allow network device access
+DeviceAllow=network rw
+# Allow hardware device access for PiCar-X (I2C, GPIO, SPI)
+DeviceAllow=/dev/i2c-* rw
+DeviceAllow=/dev/spidev*.* rw
+DeviceAllow=/dev/gpiochip* rw
+DeviceAllow=/dev/mem rw
 ExecStartPre=/bin/bash -c 'for i in {1..30}; do i2cdetect -y 1 | grep -q "14" && exit 0; sleep 2; done; i2cdetect -y 1 || true'
 ExecStart=$VENV_DIR/bin/python -m picarx_unified
 Restart=on-failure
@@ -379,6 +393,10 @@ EOF
   rm -f "$tmp_service"
   run_root systemctl daemon-reload
   run_root systemctl enable "$SERVICE_NAME"
+  # Create PiCar-X config directory if it doesn't exist
+  run_root mkdir -p /opt/picar-x
+  run_root chown -R root:root /opt/picar-x
+  run_root chmod -R 777 /opt/picar-x
 }
 
 prepare_runtime_env() {
