@@ -7,15 +7,22 @@ Wants=network-online.target
 Type=simple
 User=root
 Group=root
-WorkingDirectory=/home/car/picar-px
-EnvironmentFile=-/home/car/picar-px/.env
-Environment=PATH=/home/car/picar-px/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+WorkingDirectory=/root/picar-px
+EnvironmentFile=-/root/picar-px/.env
+Environment=PATH=/root/picar-px/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 Environment=HOME=/root
 Environment=USER=root
 Environment=LOGNAME=root
 Environment=PYTHONUNBUFFERED=1
+# Add network capabilities for WiFi monitor mode and packet capture
+CapabilityBoundingSet=CAP_NET_RAW CAP_NET_ADMIN CAP_NET_BIND_SERVICE
+AmbientCapabilities=CAP_NET_RAW CAP_NET_ADMIN CAP_NET_BIND_SERVICE
+# Allow network device access
+DeviceAllow=network rw
+# Remove capability restrictions
+NoNewPrivileges=false
 ExecStartPre=/bin/bash -c 'for i in {1..30}; do i2cdetect -y 1 | grep -q "14" && exit 0; sleep 2; done; i2cdetect -y 1 || true'
-ExecStart=/home/car/picar-px/.venv/bin/python -m picarx_unified
+ExecStart=/root/picar-px/.venv/bin/python -m picarx_unified
 Restart=on-failure
 RestartSec=5
 StandardOutput=journal

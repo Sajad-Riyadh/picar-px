@@ -389,7 +389,7 @@ class WifiJammer:
 
             # Use airodump-ng to passively discover clients.
             cmd = [
-                "sudo", "airodump-ng",
+                "airodump-ng",
                 "--bssid", bssid,
                 "-c", str(channel),
                 "--output-format", "csv",
@@ -488,7 +488,7 @@ class WifiJammer:
 
             # Bring interface down
             subprocess.run(
-                ["sudo", "ip", "link", "set", self.monitor_interface, "down"],
+                ["ip", "link", "set", self.monitor_interface, "down"],
                 check=True,
                 capture_output=True,
                 timeout=10
@@ -496,7 +496,7 @@ class WifiJammer:
 
             # Set monitor mode
             subprocess.run(
-                ["sudo", "iw", "dev", self.monitor_interface, "set", "type", "monitor"],
+                ["iw", "dev", self.monitor_interface, "set", "type", "monitor"],
                 check=True,
                 capture_output=True,
                 timeout=10
@@ -504,7 +504,7 @@ class WifiJammer:
 
             # Bring interface up
             subprocess.run(
-                ["sudo", "ip", "link", "set", self.monitor_interface, "up"],
+                ["ip", "link", "set", self.monitor_interface, "up"],
                 check=True,
                 capture_output=True,
                 timeout=10
@@ -526,19 +526,19 @@ class WifiJammer:
         """Set the WiFi interface back to managed mode for normal scans."""
         try:
             subprocess.run(
-                ["sudo", "ip", "link", "set", self.monitor_interface, "down"],
+                ["ip", "link", "set", self.monitor_interface, "down"],
                 check=True,
                 capture_output=True,
                 timeout=5
             )
             subprocess.run(
-                ["sudo", "iw", "dev", self.monitor_interface, "set", "type", "managed"],
+                ["iw", "dev", self.monitor_interface, "set", "type", "managed"],
                 check=True,
                 capture_output=True,
                 timeout=5
             )
             subprocess.run(
-                ["sudo", "ip", "link", "set", self.monitor_interface, "up"],
+                ["ip", "link", "set", self.monitor_interface, "up"],
                 check=True,
                 capture_output=True,
                 timeout=5
@@ -556,7 +556,7 @@ class WifiJammer:
         """Set the WiFi channel"""
         try:
             subprocess.run(
-                ["sudo", "iw", "dev", self.monitor_interface, "set", "channel", str(channel)],
+                ["iw", "dev", self.monitor_interface, "set", "channel", str(channel)],
                 check=True,
                 capture_output=True,
                 timeout=5
@@ -593,7 +593,7 @@ class WifiJammer:
             # Use airodump-ng for comprehensive network scanning
             temp_file = f"/tmp/airodump_scan_{uuid.uuid4().hex[:8]}"
             cmd = [
-                "sudo", "airodump-ng",
+                "airodump-ng",
                 "--output-format", "csv",
                 "-w", temp_file,
                 self.monitor_interface
@@ -699,7 +699,7 @@ class WifiJammer:
                 logger.info("airodump-ng scan found no networks; falling back to iw scan")
                 self._set_managed_mode()
                 result = subprocess.run(
-                    ["sudo", "iw", "dev", self.monitor_interface, "scan"],
+                    ["iw", "dev", self.monitor_interface, "scan"],
                     capture_output=True,
                     text=True,
                     timeout=duration + 5
