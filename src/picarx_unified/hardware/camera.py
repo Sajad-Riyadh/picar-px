@@ -148,7 +148,8 @@ class CameraService:
 
         if not self._config.force_mock_camera and allow_picamera2 and Picamera2 is not None:
             try:
-                self._picamera = Picamera2()
+                # On Raspberry Pi 5, specify camera number explicitly
+                self._picamera = Picamera2(camera_num=0)
                 requested_format = str(self._config.camera_format).upper()
                 candidate_formats = [requested_format, "BGR888", "RGB888"]
                 sensor_modes = getattr(self._picamera, "sensor_modes", [])
