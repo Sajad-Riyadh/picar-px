@@ -34,6 +34,7 @@ class StateStore:
     def __init__(self, state_dir: Path) -> None:
         self._path = state_dir / "robot_session.json"
         self._lock = FileLock(str(state_dir / ".robot_session.lock"))
+        self._emergency_stop_path = state_dir / "emergency_stop.flag"
         state_dir.mkdir(parents=True, exist_ok=True)
 
     def load(self) -> RobotSession:
@@ -69,13 +70,17 @@ class StateStore:
 
     def _load_locked(self) -> RobotSession:
         if not self._path.exists():
-            return RobotSession()
-        try:
-            data = json.loads(self._path.read_text(encoding="utf-8"))
-            return RobotSession.model_validate(data)
-        except (OSError, json.JSONDecodeError, TypeError, ValidationError, ValueError):
-            self._archive_corrupt_state()
-            return RobotSession()
+            session = RobotSession()
+        else:
+            try:
+                data = json.loads(self._path.read_text(encoding="utf-8"))
+                session = RobotSession.model_validate(data)
+            except (OSError, json.JSONDecodeError, TypeError, ValidationError, ValueError):
+                self._archive_corrupt_state()
+                session = RobotSession()
+        if self._emergency_stop_path.exists():
+            session.emergency_stop = True
+        return session
 
     def _archive_corrupt_state(self) -> None:
         if not self._path.exists():
@@ -103,4 +108,19 @@ class StateStore:
         """Write state without fsync — much faster on SD cards."""
         content = json.dumps(session.model_dump(mode="json"), indent=2, sort_keys=True)
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        self._path.write_text(content, encoding="utf-8")
+        # Use write+rename for atomic operation without fsync
+        tmp_path = self._path.with_suffix(".tmp")
+        try:
+            tmp_path.write_text(content, encoding="utf-8")
+            tmp_path.replace(self._path)  # Atomic rename
+        except OSError:
+            # If rename fails, try direct write as fallback
+            self._path.write_text(content, encoding="utf-8")
+
+    def persist_emergency_stop(self, active: bool) -> None:
+        """Persist emergency stop state to disk for recovery across restarts."""
+        with self._lock:
+            if active:
+                self._emergency_stop_path.touch()
+            elif self._emergency_stop_path.exists():
+                self._emergency_stop_path.unlink()

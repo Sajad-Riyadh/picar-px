@@ -18,6 +18,9 @@ def make_config(state_dir: Path) -> AppConfig:
     return AppConfig(
         host="127.0.0.1",
         port=8080,
+        https_enable=False,
+        ssl_certfile=None,
+        ssl_keyfile=None,
         state_dir=state_dir,
         static_dir=project_root / "src" / "picarx_unified" / "static",
         camera_width=64,
@@ -51,6 +54,7 @@ def make_config(state_dir: Path) -> AppConfig:
         autonomous_max_speed=20,
         autonomous_manual_override_seconds=2.5,
         use_mock_hardware=True,
+        hardware_init_mode="mock",
         force_mock_camera=True,
         api_token=None,
         gemini_api_key=None,

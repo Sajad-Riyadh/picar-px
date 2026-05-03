@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
 import logging
+import subprocess
+import time
+from collections import defaultdict
 from contextlib import asynccontextmanager
 from typing import Annotated
 
@@ -20,6 +24,47 @@ from .attacks.wifi_jammer import WifiJammer, JammerMode
 
 logger = logging.getLogger(__name__)
 
+
+class RateLimiter:
+    """Simple rate limiter to prevent API abuse and rapid-fire commands."""
+
+    def __init__(self, max_requests: int = 60, window_seconds: int = 60):
+        self.max_requests = max_requests
+        self.window_seconds = window_seconds
+        self._requests = defaultdict(list)
+        self._lock = asyncio.Lock()
+
+    async def is_allowed(self, client_id: str) -> bool:
+        """Check if client is within rate limits (pure check, does not record)."""
+        now = time.time()
+        cutoff = now - self.window_seconds
+
+        async with self._lock:
+            # Clean old requests outside the window
+            self._requests[client_id] = [
+                req_time for req_time in self._requests[client_id]
+                if req_time > cutoff
+            ]
+
+            return len(self._requests[client_id]) < self.max_requests
+
+    async def record_request(self, client_id: str) -> None:
+        """Record a request for rate limiting."""
+        async with self._lock:
+            self._requests[client_id].append(time.time())
+
+    def get_client_id(self, request: Request) -> str:
+        """Extract a client identifier from the request."""
+        # Use X-Forwarded-For if available, otherwise use remote address
+        forwarded = request.headers.get("x-forwarded-for")
+        if forwarded:
+            return forwarded.split(",")[0].strip()
+        return request.client.host or "unknown"
+
+
+# Global rate limiter for drive commands
+_drive_rate_limiter = RateLimiter(max_requests=120, window_seconds=60)
+
 def _authorize(request: Request, authorization: Annotated[str | None, Header()] = None) -> None:
     token = request.app.state.runtime.config.api_token
     if not token:
@@ -29,12 +74,19 @@ def _authorize(request: Request, authorization: Annotated[str | None, Header()] 
         prefix = "bearer "
         if authorization.lower().startswith(prefix):
             supplied = authorization[len(prefix) :].strip()
-    if supplied != token:
+    if not hmac.compare_digest(supplied, token):
         raise HTTPException(status_code=401, detail="Missing or invalid bearer token.")
 
 
 def _get_runtime(request: Request) -> RobotRuntime:
     return request.app.state.runtime
+
+
+def _get_jammer(request: Request) -> "WifiJammer":
+    jammer = request.app.state.wifi_jammer
+    if jammer is None:
+        raise HTTPException(status_code=503, detail="WiFi jammer is unavailable (Scapy not installed).")
+    return jammer
 
 
 def _is_static_path_allowed(static_root, target) -> bool:
@@ -44,7 +96,11 @@ def _is_static_path_allowed(static_root, target) -> bool:
 def create_app() -> FastAPI:
     config = AppConfig.from_env()
     runtime = RobotRuntime(config)
-    wifi_jammer = WifiJammer(monitor_interface="wlan1")
+    try:
+        wifi_jammer = WifiJammer(monitor_interface="wlan1")
+    except Exception as exc:
+        logger.warning("WiFi jammer is unavailable and will be disabled: %s", exc)
+        wifi_jammer = None
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -52,8 +108,9 @@ def create_app() -> FastAPI:
         app.state.runtime = runtime
         app.state.wifi_jammer = wifi_jammer
         yield
-        runtime.stop()
-        wifi_jammer.cleanup()
+        runtime.shutdown()
+        if wifi_jammer is not None:
+            wifi_jammer.cleanup()
 
     app = FastAPI(title="PiCar-X Unified", lifespan=lifespan)
 
@@ -95,11 +152,16 @@ def create_app() -> FastAPI:
         _: None = Depends(_authorize),
     ):
         runtime = _get_runtime(request)
+        client_id = _drive_rate_limiter.get_client_id(request)
+        if not await _drive_rate_limiter.is_allowed(client_id):
+            raise HTTPException(status_code=429, detail="Too many drive commands. Please slow down.")
         try:
-            return runtime.apply_drive(command)
+            result = runtime.apply_drive(command)
         except SafetyViolation as exc:
             runtime.record_error(str(exc))
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+        await _drive_rate_limiter.record_request(client_id)
+        return result
 
     @app.post("/api/drive/fast")
     async def drive_fast(
@@ -110,11 +172,16 @@ def create_app() -> FastAPI:
         """Lightweight drive endpoint: skips disk fsync + WebSocket broadcast
         for smooth high-frequency command loops."""
         runtime = _get_runtime(request)
+        client_id = _drive_rate_limiter.get_client_id(request)
+        if not await _drive_rate_limiter.is_allowed(client_id):
+            raise HTTPException(status_code=429, detail="Too many drive commands. Please slow down.")
         try:
-            return runtime.apply_drive_fast(command)
+            result = runtime.apply_drive_fast(command)
         except SafetyViolation as exc:
             runtime.record_error(str(exc))
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+        await _drive_rate_limiter.record_request(client_id)
+        return result
 
     @app.post("/api/drive/stop")
     async def stop_drive(request: Request, _: None = Depends(_authorize)):
@@ -174,7 +241,7 @@ def create_app() -> FastAPI:
         token = websocket.app.state.runtime.config.api_token
         if token:
             supplied = websocket.query_params.get("token", "")
-            if supplied != token:
+            if not hmac.compare_digest(supplied, token):
                 await websocket.close(code=4401)
                 return
         connection = VoiceConnection(websocket.app.state.runtime, websocket)
@@ -184,14 +251,16 @@ def create_app() -> FastAPI:
     @app.get("/api/jammer/robot_network")
     async def jammer_robot_network(request: Request):
         """Get information about the robot's own network"""
-        return request.app.state.wifi_jammer.get_robot_network()
+        return _get_jammer(request).get_robot_network()
 
     @app.get("/api/jammer/scan")
     async def jammer_scan(request: Request, duration: int = 10):
         """Scan for nearby WiFi networks"""
         try:
-            networks = request.app.state.wifi_jammer.scan_networks(duration=duration)
+            networks = _get_jammer(request).scan_networks(duration=duration)
             return {"networks": networks, "count": len(networks)}
+        except HTTPException:
+            raise
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
 
@@ -206,12 +275,12 @@ def create_app() -> FastAPI:
             if not bssid or not channel:
                 raise HTTPException(status_code=400, detail="bssid and channel are required")
 
-            clients = request.app.state.wifi_jammer.discover_network_clients(bssid, channel, duration=duration)
+            clients = _get_jammer(request).discover_network_clients(bssid, channel, duration=duration)
             return {"clients": clients, "count": len(clients), "bssid": bssid}
         except HTTPException:
             raise
         except Exception as e:
-            logger.error(f"Error discovering clients: {e}")
+            logger.error("Error discovering clients: %s", e)
             raise HTTPException(status_code=500, detail=str(e))
 
     @app.post("/api/jammer/start")
@@ -222,7 +291,7 @@ def create_app() -> FastAPI:
     ):
         """Start WiFi jammer in mass, targeted, or client mode"""
         try:
-            jammer = request.app.state.wifi_jammer
+            jammer = _get_jammer(request)
 
             # Extract parameters
             mode = body.get("mode", "mass")
@@ -233,9 +302,7 @@ def create_app() -> FastAPI:
             duration = body.get("duration")
 
             # Log the request for debugging
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.info(f"Jammer start request - Mode: {mode}, BSSIDs: {target_bssids}, MACs: {target_macs}, Channel: {channel}, PPS: {pps}")
+            logger.info("Jammer start request - Mode: %s, BSSIDs: %s, MACs: %s, Channel: %s, PPS: %s", mode, target_bssids, target_macs, channel, pps)
 
             # Validate mode
             if mode not in ["mass", "targeted", "client"]:
@@ -261,7 +328,7 @@ def create_app() -> FastAPI:
                 duration=duration
             )
 
-            logger.info(f"Jammer start result: {result}")
+            logger.info("Jammer start result: %s", result)
 
             if result.get("status") == "error":
                 raise HTTPException(status_code=400, detail=result.get("message", "Unknown error"))
@@ -271,16 +338,16 @@ def create_app() -> FastAPI:
         except HTTPException:
             raise
         except Exception as e:
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.error(f"Jammer start error: {e}", exc_info=True)
+            logger.error("Jammer start error: %s", e, exc_info=True)
             raise HTTPException(status_code=500, detail=str(e))
 
     @app.post("/api/jammer/stop")
     async def jammer_stop(request: Request, _: None = Depends(_authorize)):
         """Stop WiFi jammer"""
         try:
-            return request.app.state.wifi_jammer.stop_attack()
+            return _get_jammer(request).stop_attack()
+        except HTTPException:
+            raise
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
 
@@ -288,7 +355,9 @@ def create_app() -> FastAPI:
     async def jammer_status(request: Request):
         """Get WiFi jammer status"""
         try:
-            return request.app.state.wifi_jammer.get_status()
+            return _get_jammer(request).get_status()
+        except HTTPException:
+            raise
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
 
@@ -296,15 +365,14 @@ def create_app() -> FastAPI:
     async def jammer_test(request: Request):
         """Test WiFi jammer configuration"""
         try:
-            jammer = request.app.state.wifi_jammer
+            jammer = _get_jammer(request)
 
             # Check if aircrack-ng is available
-            import subprocess
             aircrack_available = False
             try:
                 result = subprocess.run(["which", "airodump-ng"], capture_output=True, text=True, timeout=2)
                 aircrack_available = result.returncode == 0
-            except:
+            except Exception:
                 pass
 
             # Check if Scapy is available
@@ -326,9 +394,7 @@ def create_app() -> FastAPI:
                 "robot_network": robot_network
             }
         except Exception as e:
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.error(f"Jammer test error: {e}", exc_info=True)
+            logger.error("Jammer test error: %s", e, exc_info=True)
             raise HTTPException(status_code=500, detail=str(e))
 
     return app

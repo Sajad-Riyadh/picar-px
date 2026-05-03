@@ -1874,8 +1874,13 @@ class WiFiJammerController {
     this.dom.cancelAttackBtn.addEventListener("click", () => this.hideLegalWarning());
     this.dom.confirmAttackBtn.addEventListener("click", () => this.confirmStartAttack());
     this.dom.legalModal.addEventListener("click", (event) => {
+      // Only close if clicking the close button or pressing Escape
+      if (event.target === this.dom.cancelAttackBtn || event.target === this.dom.confirmAttackBtn) {
+        return;
+      }
+      // Prevent closing when clicking outside the modal content
       if (event.target === this.dom.legalModal) {
-        this.hideLegalWarning();
+        event.stopPropagation();
       }
     });
     document.addEventListener("keydown", (event) => {

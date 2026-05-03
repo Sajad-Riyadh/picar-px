@@ -104,15 +104,46 @@ class RobotRuntime:
         self._watchdog_thread.start()
 
     def stop(self) -> None:
+        """Stop all services. Delegates to shutdown() for consistent error isolation."""
+        self.shutdown()
+
+    def shutdown(self) -> None:
+        """Gracefully shutdown all services and hardware."""
+        logger.info("Initiating graceful shutdown...")
         self._running = False
-        self.behaviors.stop()
-        self.vision.stop()
-        self.camera.stop()
-        self.audio.close()
-        self.hardware.stop()
-        self.store.update(self._refresh_session_metadata)
+        # Stop all behaviors first
+        try:
+            self.behaviors.stop()
+        except Exception:
+            logger.exception("Error stopping behaviors", exc_info=True)
+        # Stop vision and camera
+        try:
+            self.vision.stop()
+        except Exception:
+            logger.exception("Error stopping vision", exc_info=True)
+        try:
+            self.camera.stop()
+        except Exception:
+            logger.exception("Error stopping camera", exc_info=True)
+        # Stop audio and close audio context
+        try:
+            self.audio.close()
+        except Exception:
+            logger.exception("Error stopping audio", exc_info=True)
+        # Stop hardware - this ensures motors are stopped
+        try:
+            self.hardware.stop()
+        except Exception:
+            logger.exception("Error stopping hardware", exc_info=True)
+        # Save final state
+        try:
+            self.store.update(self._refresh_session_metadata)
+        except Exception:
+            logger.exception("Error saving final state", exc_info=True)
+        # Wait for watchdog thread to finish
         if self._watchdog_thread and self._watchdog_thread.is_alive():
             self._watchdog_thread.join(timeout=1.0)
+        logger.info("Graceful shutdown complete")
 
     def current_session(self) -> RobotSession:
         return self._prepare_session(self.store.load())
@@ -279,6 +310,8 @@ class RobotRuntime:
     def trigger_emergency_stop(self, reason: str = "Emergency stop requested.") -> RobotSession:
         self.hardware.stop()
         self._last_drive_source = "emergency_stop"
+        # Persist emergency stop to disk for recovery across restarts
+        self.store.persist_emergency_stop(True)
         session = self.store.update(
             lambda state: self._set_emergency_state(
                 state,
@@ -296,6 +329,7 @@ class RobotRuntime:
                 error=None,
             )
         )
+        self.store.persist_emergency_stop(False)
         return self._publish_state(session)
 
     async def answer_vision_question(self, question: str) -> str:
