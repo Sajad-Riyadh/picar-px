@@ -199,6 +199,75 @@ class RuntimeHelperTests(unittest.TestCase):
 
         self.assertTrue(_is_expected_websocket_disconnect(exc))
 
+    def test_startup_forces_autonomous_mode_disabled_even_if_persisted_enabled(self) -> None:
+        """Restart must never resume autonomous motion from persisted state."""
+        with TemporaryDirectory() as tmp_dir:
+            state_dir = Path(tmp_dir)
+            # Persist a session with autonomous mode ON (simulating previous run)
+            store = StateStore(state_dir)
+            session = RobotSession()
+            session.settings.autonomous_mode_enabled = True
+            store.save(session)
+
+            runtime = RobotRuntime(make_config(state_dir))
+            loop = asyncio.new_event_loop()
+            try:
+                runtime.start(loop)
+                loaded = store.load()
+            finally:
+                runtime.stop()
+                loop.close()
+
+            self.assertFalse(loaded.settings.autonomous_mode_enabled,
+                             "autonomous_mode_enabled must be False after startup")
+            self.assertEqual(runtime.hardware.snapshot().drive_speed, 0,
+                             "Motors must be stopped at startup")
+
+    def test_startup_hardware_motors_stopped(self) -> None:
+        """Hardware motors must be at zero immediately after start(), before any command."""
+        with TemporaryDirectory() as tmp_dir:
+            runtime = RobotRuntime(make_config(Path(tmp_dir)))
+            loop = asyncio.new_event_loop()
+            try:
+                runtime.start(loop)
+                snap = runtime.hardware.snapshot()
+            finally:
+                runtime.stop()
+                loop.close()
+
+            self.assertEqual(snap.drive_speed, 0)
+            self.assertEqual(snap.steering, 0)
+
+    def test_autonomous_motion_requires_explicit_api_enable(self) -> None:
+        """Behavior loop must not send drive commands until autonomous mode is explicitly enabled."""
+        with TemporaryDirectory() as tmp_dir:
+            state_dir = Path(tmp_dir)
+            runtime = RobotRuntime(make_config(state_dir))
+            autonomous_drive_calls: list = []
+            original = runtime.apply_autonomous_drive
+
+            def recording_apply(request, action):
+                autonomous_drive_calls.append((request, action))
+                return original(request, action)
+
+            runtime.apply_autonomous_drive = recording_apply
+
+            loop = asyncio.new_event_loop()
+            try:
+                runtime.start(loop)
+                # Let the behavior loop tick a couple of times
+                import time; time.sleep(0.3)
+                calls_before_enable = len(autonomous_drive_calls)
+
+                # Now explicitly enable autonomous mode
+                runtime.update_settings(SettingsUpdateRequest(autonomous_mode_enabled=True))
+            finally:
+                runtime.stop()
+                loop.close()
+
+            self.assertEqual(calls_before_enable, 0,
+                             "No autonomous drive commands should fire before explicit enable")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -97,6 +97,9 @@ class RobotRuntime:
         self.hardware.reset_pose()
         session = self.store.update(self._initialize_runtime_state)
         self._apply_runtime_settings(session.settings)
+        # Belt-and-suspenders: ensure motors are stopped before any thread starts.
+        self.hardware.stop()
+        logger.info("Autonomous motion disabled at startup; manual enable required.")
         self.camera.start()
         self.vision.start()
         self.behaviors.start()
@@ -477,6 +480,8 @@ class RobotRuntime:
     def _initialize_runtime_state(self, state: RobotSession) -> None:
         state.voice_mode = state.settings.startup_voice_mode
         state.audio_target = state.settings.startup_audio_target
+        # Always disable autonomous motion at startup regardless of persisted state.
+        state.settings.autonomous_mode_enabled = False
         self._refresh_session_metadata(state)
 
     def _refresh_session_metadata(self, state: RobotSession) -> None:
