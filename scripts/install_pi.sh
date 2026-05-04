@@ -421,6 +421,19 @@ EOF
   run_root chmod -R 777 /opt/picar-x
 }
 
+install_avahi_service() {
+  command -v avahi-daemon >/dev/null 2>&1 || return
+  local src="$PROJECT_DIR/deploy/picarx.avahi"
+  [[ -f "$src" ]] || return
+  log "Installing Avahi mDNS service advertisement"
+  run_root mkdir -p /etc/avahi/services
+  run_root cp "$src" /etc/avahi/services/picarx.service
+  run_root chmod 644 /etc/avahi/services/picarx.service
+  if command -v systemctl >/dev/null 2>&1; then
+    run_root systemctl restart avahi-daemon || true
+  fi
+}
+
 prepare_runtime_env() {
   ensure_env_file
   ensure_env_defaults
@@ -487,6 +500,7 @@ main() {
     ensure_env_defaults
     ensure_hostname_resolution
     install_systemd_service
+    install_avahi_service
     prepare_runtime_env
   fi
 

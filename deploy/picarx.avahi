@@ -1,0 +1,17 @@
+<?xml version="1.0" standalone='no'?>
+<!DOCTYPE service-group SYSTEM "avahi-service.dtd">
+<service-group>
+  <!-- %h expands to the Pi's current hostname (picarx) -->
+  <name replace-wildcards="yes">PiCar-X on %h</name>
+  <service>
+    <type>_https._tcp</type>
+    <port>8080</port>
+    <txt-record>path=/</txt-record>
+  </service>
+  <service>
+    <!-- Advertise plain HTTP as fallback (used when HTTPS is disabled) -->
+    <type>_http._tcp</type>
+    <port>8080</port>
+    <txt-record>path=/</txt-record>
+  </service>
+</service-group>
