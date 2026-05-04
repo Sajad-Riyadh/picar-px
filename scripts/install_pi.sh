@@ -146,10 +146,43 @@ install_system_packages() {
     alsa-utils \
     avahi-daemon \
     openssl \
-    aircrack-ng
+    aircrack-ng \
+    samba
 
   if command -v systemctl >/dev/null 2>&1; then
     run_root systemctl enable --now avahi-daemon || true
+  fi
+}
+
+install_samba_netbios() {
+  command -v nmbd >/dev/null 2>&1 || return
+
+  local host_name
+  host_name="$(hostname 2>/dev/null || printf 'picarx')"
+
+  local smb_conf="/etc/samba/smb.conf"
+  [[ -f "$smb_conf" ]] || return
+
+  # Only write once — skip if already configured by us
+  if grep -q 'wins support = yes' "$smb_conf" 2>/dev/null; then
+    log "Samba NetBIOS already configured"
+  else
+    log "Configuring Samba for Windows NetBIOS name resolution"
+    cat >> "$smb_conf" <<EOF
+
+# PiCar-X: advertise hostname to Windows via NetBIOS (no client setup needed)
+[global]
+   netbios name = ${host_name^^}
+   workgroup = WORKGROUP
+   server role = standalone server
+   wins support = yes
+   dns proxy = no
+EOF
+  fi
+
+  if command -v systemctl >/dev/null 2>&1; then
+    run_root systemctl enable --now smbd nmbd || true
+    run_root systemctl restart nmbd || true
   fi
 }
 
@@ -317,13 +350,14 @@ subjectAltName = @alt_names
 DNS.1 = picarx.local
 DNS.2 = $host_name
 DNS.3 = ${host_name}.local
+DNS.4 = picarx
 IP.1 = 127.0.0.1
 EOF
 
   run_root openssl req -x509 -newkey rsa:2048 -nodes \
     -keyout "$keyfile" \
     -out "$certfile" \
-    -days 365 \
+    -days 3650 \
     -config "$openssl_config" >/dev/null 2>&1
   rm -f "$openssl_config"
   run_root chmod 600 "$keyfile"
@@ -395,8 +429,8 @@ ExecStartPre=/bin/bash -c '\
       mkdir -p "\$(dirname \$CERT)" "\$(dirname \$KEY)"; \
       HOST=\$(hostname 2>/dev/null || echo picarx); \
       CFG=\$(mktemp /tmp/picarx-ssl-XXXXXX.cnf); \
-      printf "[req]\ndistinguished_name=dn\nx509_extensions=v3_req\nprompt=no\n[dn]\nCN=picarx.local\n[v3_req]\nsubjectAltName=@alt\n[alt]\nDNS.1=picarx.local\nDNS.2=%s\nDNS.3=%s.local\nIP.1=127.0.0.1\n" "\$HOST" "\$HOST" > "\$CFG"; \
-      openssl req -x509 -newkey rsa:2048 -nodes -keyout "\$KEY" -out "\$CERT" -days 365 -config "\$CFG" >/dev/null 2>&1; \
+      printf "[req]\ndistinguished_name=dn\nx509_extensions=v3_req\nprompt=no\n[dn]\nCN=picarx.local\n[v3_req]\nsubjectAltName=@alt\n[alt]\nDNS.1=picarx.local\nDNS.2=%s\nDNS.3=%s.local\nDNS.4=picarx\nIP.1=127.0.0.1\n" "\$HOST" "\$HOST" > "\$CFG"; \
+      openssl req -x509 -newkey rsa:2048 -nodes -keyout "\$KEY" -out "\$CERT" -days 3650 -config "\$CFG" >/dev/null 2>&1; \
       rm -f "\$CFG"; \
       chmod 600 "\$KEY"; chmod 644 "\$CERT"; \
     fi; \
@@ -499,6 +533,7 @@ main() {
     ensure_env_file
     ensure_env_defaults
     ensure_hostname_resolution
+    install_samba_netbios
     install_systemd_service
     install_avahi_service
     prepare_runtime_env
