@@ -156,15 +156,39 @@ class VisionService:
                 frame_height=frame_height,
             )
         grayscale = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        # Downscale the grayscale image before running detectors so cascades
+        # operate on fewer pixels (~4x faster at 50% scale). Detection
+        # coordinates are scaled back to full resolution before returning.
+        detect_scale = float(self._config.detection_downscale)
+        if 0.0 < detect_scale < 1.0:
+            detect_w = max(1, int(frame_width * detect_scale))
+            detect_h = max(1, int(frame_height * detect_scale))
+            detect_gray = cv2.resize(grayscale, (detect_w, detect_h), interpolation=cv2.INTER_AREA)
+        else:
+            detect_scale = 1.0
+            detect_w, detect_h, detect_gray = frame_width, frame_height, grayscale
         context = DetectorContext(
             frame=frame,
-            grayscale=grayscale,
-            frame_width=frame_width,
-            frame_height=frame_height,
+            grayscale=detect_gray,
+            frame_width=detect_w,
+            frame_height=detect_h,
         )
         detections: list[Detection] = []
         for detector in self._detectors:
             detections.extend(detector.detect(context, settings))
+        # Scale detection coordinates back to the full-resolution frame so the
+        # browser overlay and vision summary use the correct pixel positions.
+        if detect_scale < 1.0:
+            inv = 1.0 / detect_scale
+            detections = [
+                det.model_copy(update={
+                    "x": int(det.x * inv),
+                    "y": int(det.y * inv),
+                    "width": int(det.width * inv),
+                    "height": int(det.height * inv),
+                })
+                for det in detections
+            ]
         detections = remove_overlapping_motion_detections(
             non_max_suppression(detections, iou_threshold=0.42)
         )

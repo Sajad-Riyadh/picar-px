@@ -126,6 +126,7 @@ class AppConfig:
     face_scale_factor: float
     face_min_neighbors: int
     vision_loop_seconds: float
+    detection_downscale: float
     motion_object_min_area: int
     autonomous_max_speed: int
     autonomous_manual_override_seconds: float
@@ -194,7 +195,11 @@ class AppConfig:
             face_min_size=_env_int("PICARX_FACE_MIN_SIZE", 40),
             face_scale_factor=_env_float("PICARX_FACE_SCALE_FACTOR", 1.08),
             face_min_neighbors=_env_int("PICARX_FACE_MIN_NEIGHBORS", 4),
-            vision_loop_seconds=_env_float("PICARX_VISION_LOOP_SECONDS", 0.25),
+            vision_loop_seconds=_env_float("PICARX_VISION_LOOP_SECONDS", 0.5),
+            # Downscale factor for cascade detection frames (0.5 = half-res = ~4x faster).
+            # Coordinates are scaled back to full resolution before use.
+            # Set PICARX_DETECTION_DOWNSCALE=1.0 to disable downscaling.
+            detection_downscale=_env_float("PICARX_DETECTION_DOWNSCALE", 0.5),
             motion_object_min_area=_env_int("PICARX_MOTION_OBJECT_MIN_AREA", 2400),
             autonomous_max_speed=_env_int("PICARX_AUTONOMOUS_MAX_SPEED", 20),
             autonomous_manual_override_seconds=_env_float(
