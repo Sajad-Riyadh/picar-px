@@ -35,6 +35,18 @@ from .vision import VisionService
 
 logger = logging.getLogger(__name__)
 
+
+def _get_lan_ip() -> str | None:
+    """Return the primary outbound LAN IP without sending any packets."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("8.8.8.8", 80))
+            ip = s.getsockname()[0]
+            return ip if ip not in ("127.0.0.1", "::1", "") else None
+    except Exception:
+        return None
+
+
 def _is_expected_websocket_disconnect(exc: BaseException) -> bool:
     current: BaseException | None = exc
     while current is not None:
@@ -159,7 +171,11 @@ class RobotRuntime:
     def health(self) -> HealthResponse:
         scheme = "https" if self.config.https_enabled else "http"
         system_hostname = socket.gethostname()
-        public_hosts = [system_hostname, f"{system_hostname}.local"]
+        lan_ip = _get_lan_ip()
+        public_hosts: list[str] = []
+        if lan_ip:
+            public_hosts.append(lan_ip)
+        public_hosts += [system_hostname, f"{system_hostname}.local"]
         public_urls = [f"{scheme}://{host}:{self.config.port}/" for host in public_hosts if host]
         return HealthResponse(
             ok=True,
@@ -171,6 +187,7 @@ class RobotRuntime:
                 "configured_host": self.config.host,
                 "configured_port": self.config.port,
                 "system_hostname": system_hostname,
+                "lan_ip": lan_ip,
                 "https_enabled": self.config.https_enabled,
                 "https_requested": self.config.https_enable,
                 "ssl_certfile": str(self.config.ssl_certfile) if self.config.ssl_certfile else None,

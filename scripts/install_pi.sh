@@ -456,6 +456,28 @@ run_application() {
   exec python -m picarx_unified
 }
 
+print_access_urls() {
+  local scheme="http"
+  case "${PICARX_HTTPS_ENABLE:-false}" in
+    1|true|yes|on) scheme="https" ;;
+  esac
+  local port="${PICARX_PORT:-8080}"
+  local hostname
+  hostname="$(hostname 2>/dev/null || echo picarx)"
+  local lan_ip
+  lan_ip="$(python3 -c "import socket; s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM); s.connect(('8.8.8.8',80)); print(s.getsockname()[0]); s.close()" 2>/dev/null || hostname -I 2>/dev/null | awk '{print $1}' || true)"
+
+  printf '\n%s\n' "=========================================================="
+  printf '%s\n'   " PiCar-X dashboard access URLs"
+  printf '%s\n'   "=========================================================="
+  if [[ -n "$lan_ip" ]]; then
+    printf '  %s://%s:%s/\n' "$scheme" "$lan_ip" "$port"
+    printf '    ^ use this IP if .local does not resolve in your browser\n'
+  fi
+  printf '  %s://%s.local:%s/\n' "$scheme" "$hostname" "$port"
+  printf '%s\n\n' "=========================================================="
+}
+
 main() {
   if (( INSTALL_DEPS )); then
     install_system_packages
@@ -475,12 +497,14 @@ main() {
     log "Starting $SERVICE_NAME"
     run_root systemctl restart "$SERVICE_NAME"
     run_root systemctl status "$SERVICE_NAME" --no-pager
+    print_access_urls
   else
     log "Installation complete"
     printf 'Run the app later with:\n  bash scripts/install_pi.sh --run-only\n'
     if (( INSTALL_SERVICE )) && command -v systemctl >/dev/null 2>&1; then
       printf 'Or start the boot service with:\n  sudo systemctl start %s\n' "$SERVICE_NAME"
     fi
+    print_access_urls
   fi
 }
 
