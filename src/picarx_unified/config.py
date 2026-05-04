@@ -126,6 +126,7 @@ class AppConfig:
     use_mock_hardware: bool
     hardware_init_mode: str
     force_mock_camera: bool
+    hog_enabled: bool
     api_token: str | None
     gemini_api_key: str | None
     gemini_live_model: str
@@ -157,7 +158,7 @@ class AppConfig:
             static_dir=static_dir,
             camera_width=_env_int("PICARX_CAMERA_WIDTH", 640),
             camera_height=_env_int("PICARX_CAMERA_HEIGHT", 480),
-            camera_fps=_env_int("PICARX_CAMERA_FPS", 20),
+            camera_fps=_env_int("PICARX_CAMERA_FPS", 10),
             camera_index=_env_int("PICARX_CAMERA_INDEX", 0),
             camera_force_backend=_env_text("PICARX_CAMERA_FORCE_BACKEND", "auto") or "auto",
             camera_format=_env_text("PICARX_CAMERA_FORMAT", "RGB888") or "RGB888",
@@ -191,6 +192,11 @@ class AppConfig:
             use_mock_hardware=_env_flag("PICARX_USE_MOCK", False),
             hardware_init_mode=_env_text("PICARX_HARDWARE_INIT_MODE", "auto") or "auto",
             force_mock_camera=_env_flag("PICARX_FORCE_MOCK_CAMERA", False),
+            # HOG person detector is disabled by default: it consumes one full CPU
+            # core continuously (~150 ms/frame on Pi 4) and contributes to the
+            # power spike that causes undervoltage reboots on marginal PSUs.
+            # Set PICARX_HOG_ENABLED=true in .env to opt in.
+            hog_enabled=_env_flag("PICARX_HOG_ENABLED", False),
             api_token=_env_text("PICARX_API_TOKEN"),
             gemini_api_key=_env_text("GEMINI_API_KEY"),
             gemini_live_model=_env_text("GEMINI_LIVE_MODEL", "gemini-3.1-flash-live-preview")

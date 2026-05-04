@@ -137,7 +137,9 @@ class PicarxAdapter:
         probe_env = os.environ.copy()
         probe_env.setdefault("HOME", os.path.expanduser("~"))
         for attempt in range(1, max_retries + 1):
-            time.sleep(5)
+            # Wait 10 s before the first probe so the Picamera2 ISP warm-up
+            # completes before we add a subprocess fork to the power load.
+            time.sleep(10 if attempt == 1 else 5)
             try:
                 result = subprocess.run(
                     probe_cmd, capture_output=True, text=True, timeout=30,

@@ -64,7 +64,11 @@ class VisionService:
                 min_size=(48, 48),
                 confidence=0.74,
             ),
-            HogPersonDetector(enabled=(os.name != "nt" and not config.force_mock_camera)),
+            HogPersonDetector(enabled=(
+                config.hog_enabled
+                and os.name != "nt"
+                and not config.force_mock_camera
+            )),
             MotionObjectDetector(config.motion_object_min_area),
         )
 

@@ -240,9 +240,9 @@ class HogPersonDetector:
             frame = cv2.resize(frame, (0, 0), fx=scale, fy=scale)
         boxes, weights = self._hog.detectMultiScale(
             frame,
-            winStride=(8, 8),
+            winStride=(16, 16),  # coarser stride: ~4x fewer windows than (8,8)
             padding=(8, 8),
-            scale=1.05,
+            scale=1.2,           # coarser pyramid: ~3x fewer scales than 1.05
         )
         detections: list[Detection] = []
         for (x, y, width, height), weight in zip(boxes, weights):
