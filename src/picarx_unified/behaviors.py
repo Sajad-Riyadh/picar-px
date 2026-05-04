@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+import math
 import threading
 import time
 from typing import Callable
@@ -22,6 +24,15 @@ from .models import (
 )
 from .safety import SafetyGuard
 from .vision import VisionService
+
+
+logger = logging.getLogger(__name__)
+
+# Tracking state constants
+_TRACK_IDLE = "idle"
+_TRACK_ACTIVE = "active"
+_TRACK_LOST = "lost"
+_TRACK_RECENTERING = "recentering"
 
 
 class RobotBehaviorController:
@@ -68,6 +79,19 @@ class RobotBehaviorController:
         self._last_behavior_action = ""
         self._last_autonomy_action = ""
         self._autonomy_motion_active = False
+        # --- Tracking state ---
+        # Smoothed error (exponential moving average) in pixels
+        self._error_x_smooth: float = 0.0
+        self._error_y_smooth: float = 0.0
+        # Center of the last tracked detection in frame pixels
+        self._tracked_cx: float | None = None
+        self._tracked_cy: float | None = None
+        # Monotonic timestamp of the last servo move command sent
+        self._last_servo_time: float = 0.0
+        # Monotonic timestamp when the target was first lost (None = not lost)
+        self._lost_since: float | None = None
+        # Human-readable tracking phase
+        self._tracking_state: str = _TRACK_IDLE
 
     def start(self) -> None:
         if self._running:
@@ -81,19 +105,53 @@ class RobotBehaviorController:
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=1.0)
 
+    @property
+    def tracking_state(self) -> str:
+        """Current auto-follow phase: idle | active | lost | recentering."""
+        return self._tracking_state
+
     def _loop(self) -> None:
         while self._running:
             snapshot = self._vision.get_snapshot()
             settings = self._get_settings()
             tracking_target = self._select_tracking_target(snapshot)
 
-            if settings.auto_tracking_enabled and tracking_target is not None and not self._manual_override_active():
-                self._track_target(
-                    tracking_target,
-                    snapshot.frame_width,
-                    snapshot.frame_height,
-                    settings.camera_step_degrees,
-                )
+            if settings.auto_tracking_enabled and not self._manual_override_active():
+                if tracking_target is not None:
+                    # Target reacquired after loss — log the recovery once
+                    if self._lost_since is not None:
+                        logger.info(
+                            "Auto-follow: target reacquired (%s).",
+                            tracking_target.display_label or tracking_target.label,
+                        )
+                    self._lost_since = None
+                    self._tracking_state = _TRACK_ACTIVE
+                    self._track_target(
+                        tracking_target,
+                        snapshot.frame_width,
+                        snapshot.frame_height,
+                        settings.camera_step_degrees,
+                    )
+                else:
+                    now = time.monotonic()
+                    if self._lost_since is None:
+                        self._lost_since = now
+                        self._tracking_state = _TRACK_LOST
+                        logger.info("Auto-follow: target lost. Waiting %.1f s before recentering.",
+                                    self._config.tracking_lost_target_timeout)
+                        self._record_behavior_action("Auto-follow: target lost.")
+                    elif now - self._lost_since >= self._config.tracking_lost_target_timeout:
+                        self._tracking_state = _TRACK_RECENTERING
+                        self._recenter_camera()
+            else:
+                # Tracking disabled or manual override — reset state cleanly
+                if self._tracking_state != _TRACK_IDLE:
+                    self._tracking_state = _TRACK_IDLE
+                    self._lost_since = None
+                    self._error_x_smooth = 0.0
+                    self._error_y_smooth = 0.0
+                    self._tracked_cx = None
+                    self._tracked_cy = None
 
             if self._should_greet(snapshot, settings):
                 self._greet(settings, snapshot.summary)
@@ -107,17 +165,63 @@ class RobotBehaviorController:
             time.sleep(max(self._config.vision_loop_seconds, 0.08))
 
     def _select_tracking_target(self, snapshot: VisionSnapshot) -> Detection | None:
+        """Pick the best detection target using a stable scoring heuristic.
+
+        Priority order: face > person > cat > object.  Within the same label,
+        score each candidate by:
+          - continuity  — prefer the detection closest to the previously tracked
+                          centre (avoids erratic target switching).
+          - centre bias — prefer detections near the frame centre.
+          - area        — larger detections are more reliable.
+
+        The continuity bonus is double-weighted so that a face already being
+        tracked is only replaced if a significantly better candidate exists.
+        """
+        if not snapshot.detections:
+            return None
+
+        frame_w = snapshot.frame_width or 320
+        frame_h = snapshot.frame_height or 240
+        frame_cx = frame_w / 2
+        frame_cy = frame_h / 2
+        frame_diag = math.hypot(frame_w, frame_h) or 1.0
+
         preferred = (
             DetectionLabel.FACE.value,
             DetectionLabel.PERSON.value,
             DetectionLabel.CAT.value,
             DetectionLabel.OBJECT.value,
         )
+
+        def score(d: Detection) -> float:
+            cx = d.x + d.width / 2
+            cy = d.y + d.height / 2
+            # Centre bias: 0 = at edge, 1 = dead-centre
+            centre_score = 1.0 - math.hypot(cx - frame_cx, cy - frame_cy) / (frame_diag / 2)
+            # Area score: 0 = tiny, 1 = fills frame
+            area_score = (d.width * d.height) / (frame_w * frame_h)
+            # Continuity bonus: reward staying on the same face
+            continuity = 0.0
+            if self._tracked_cx is not None and self._tracked_cy is not None:
+                dist = math.hypot(cx - self._tracked_cx, cy - self._tracked_cy)
+                # Bonus decays linearly from 1 → 0 over one frame-diagonal
+                continuity = max(0.0, 1.0 - dist / frame_diag)
+            return continuity * 2.0 + centre_score + area_score * 0.5
+
         for label in preferred:
-            for detection in snapshot.detections:
-                if detection.label == label:
-                    return detection
-        return snapshot.detections[0] if snapshot.detections else None
+            candidates = [d for d in snapshot.detections if d.label == label]
+            if candidates:
+                best = max(candidates, key=score)
+                logger.debug(
+                    "Auto-follow target selected: %s (score=%.2f, cx=%.0f, cy=%.0f).",
+                    best.display_label or best.label,
+                    score(best),
+                    best.x + best.width / 2,
+                    best.y + best.height / 2,
+                )
+                return best
+
+        return snapshot.detections[0]
 
     def _select_human_target(self, snapshot: VisionSnapshot) -> Detection | None:
         for detection in snapshot.detections:
@@ -139,30 +243,125 @@ class RobotBehaviorController:
         frame_height: int,
         step_degrees: int,
     ) -> None:
+        """Move the camera to keep *detection* centred in the frame.
+
+        Improvements over the original step-only approach:
+        - Exponential moving average (EMA) smooths raw pixel error so that a
+          single noisy detection does not jerk the camera.
+        - Movement is proportional to the smoothed error magnitude, scaled by
+          ``step_degrees`` as the maximum step per update.
+        - A deadband suppresses micro-corrections that cause jitter.
+        - A minimum interval between servo commands rate-limits the updates so
+          the servos are not hammered faster than they can physically move.
+        - Servo positions are always clamped by the safety guard.
+        """
         if frame_width <= 0 or frame_height <= 0:
             return
+
+        now = time.monotonic()
+        min_interval = self._config.tracking_update_interval_ms / 1000.0
+        if now - self._last_servo_time < min_interval:
+            return
+
+        target_cx = detection.x + detection.width / 2
+        target_cy = detection.y + detection.height / 2
+
+        # Update persistent tracked centre for the next target-selection cycle
+        self._tracked_cx = target_cx
+        self._tracked_cy = target_cy
+
+        frame_cx = frame_width / 2
+        frame_cy = frame_height / 2
+
+        raw_err_x = target_cx - frame_cx   # positive → target is right of centre
+        raw_err_y = target_cy - frame_cy   # positive → target is below centre
+
+        # EMA smoothing: new = alpha*raw + (1-alpha)*prev
+        alpha = max(0.05, min(1.0, self._config.tracking_smoothing))
+        self._error_x_smooth = alpha * raw_err_x + (1.0 - alpha) * self._error_x_smooth
+        self._error_y_smooth = alpha * raw_err_y + (1.0 - alpha) * self._error_y_smooth
+
+        deadband = self._config.tracking_deadband_px
         snapshot = self._hardware.snapshot()
-        target_center_x = detection.x + detection.width / 2
-        target_center_y = detection.y + detection.height / 2
-        frame_center_x = frame_width / 2
-        frame_center_y = frame_height / 2
         pan = snapshot.pan
         tilt = snapshot.tilt
-        if target_center_x < frame_center_x - self._config.tracking_deadband_px:
-            pan -= step_degrees
-        elif target_center_x > frame_center_x + self._config.tracking_deadband_px:
-            pan += step_degrees
-        if target_center_y < frame_center_y - self._config.tracking_deadband_px:
-            tilt += step_degrees
-        elif target_center_y > frame_center_y + self._config.tracking_deadband_px:
-            tilt -= step_degrees
+        changed = False
+
+        if abs(self._error_x_smooth) > deadband:
+            # Proportional step: max step_degrees at full-frame displacement
+            scale = min(abs(self._error_x_smooth) / (frame_width / 2), 1.0)
+            move = max(1, round(step_degrees * scale))
+            pan += move if self._error_x_smooth > 0 else -move
+            changed = True
+
+        if abs(self._error_y_smooth) > deadband:
+            scale = min(abs(self._error_y_smooth) / (frame_height / 2), 1.0)
+            move = max(1, round(step_degrees * scale))
+            # Camera tilt: positive error (below centre) → tilt down (negative tilt)
+            tilt += -move if self._error_y_smooth > 0 else move
+            changed = True
+
+        if not changed:
+            return
+
         safe = self._guard.sanitize_camera(CameraRequest(pan=pan, tilt=tilt))
         if safe.pan == snapshot.pan and safe.tilt == snapshot.tilt:
             return
+
         self._hardware.set_camera(safe.pan, safe.tilt)
         self._on_camera_pose(safe.pan, safe.tilt)
+        self._last_servo_time = now
+
         display_name = detection.display_label or detection.label.replace("_", " ").title()
-        self._record_behavior_action(f"Tracking {display_name}.")
+        self._record_behavior_action(f"Auto-follow: tracking {display_name}.")
+        logger.debug(
+            "Auto-follow: pan=%d tilt=%d err=(%.1f, %.1f) smooth=(%.1f, %.1f).",
+            safe.pan, safe.tilt,
+            raw_err_x, raw_err_y,
+            self._error_x_smooth, self._error_y_smooth,
+        )
+
+    def _recenter_camera(self) -> None:
+        """Slowly return the camera to centre when the target has been lost.
+
+        Each call nudges pan and tilt one small step toward zero.  When the
+        camera reaches centre the tracking state resets to idle.
+        """
+        snapshot = self._hardware.snapshot()
+        pan = snapshot.pan
+        tilt = snapshot.tilt
+
+        if pan == 0 and tilt == 0:
+            # Already centred — clean up tracking state
+            self._tracking_state = _TRACK_IDLE
+            self._tracked_cx = None
+            self._tracked_cy = None
+            self._error_x_smooth = 0.0
+            self._error_y_smooth = 0.0
+            self._lost_since = None
+            logger.info("Auto-follow: camera recentred. Tracking idle.")
+            self._record_behavior_action("Auto-follow: camera recentred.")
+            return
+
+        now = time.monotonic()
+        min_interval = self._config.tracking_update_interval_ms / 1000.0
+        if now - self._last_servo_time < min_interval:
+            return
+
+        # Nudge toward zero by half the configured step (slower than tracking)
+        step = max(1, self._config.tracking_step_degrees // 2)
+        new_pan = pan - int(math.copysign(min(step, abs(pan)), pan))
+        new_tilt = tilt - int(math.copysign(min(step, abs(tilt)), tilt))
+
+        safe = self._guard.sanitize_camera(CameraRequest(pan=new_pan, tilt=new_tilt))
+        if safe.pan == pan and safe.tilt == tilt:
+            return
+
+        self._hardware.set_camera(safe.pan, safe.tilt)
+        self._on_camera_pose(safe.pan, safe.tilt)
+        self._last_servo_time = now
+        self._record_behavior_action("Auto-follow: recentering camera.")
+        logger.debug("Auto-follow: recentering pan=%d→%d tilt=%d→%d.", pan, safe.pan, tilt, safe.tilt)
 
     def _greet(self, settings: SettingsState, vision_summary: str) -> None:
         _, target = self._get_audio_state()

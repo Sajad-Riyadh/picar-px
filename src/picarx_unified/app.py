@@ -217,7 +217,11 @@ def create_app() -> FastAPI:
 
     @app.get("/api/vision")
     async def vision_summary(request: Request):
-        return _get_runtime(request).vision.get_snapshot()
+        runtime = _get_runtime(request)
+        snapshot = runtime.vision.get_snapshot()
+        data = snapshot.model_dump()
+        data["tracking_state"] = runtime.behaviors.tracking_state
+        return data
 
     @app.post("/api/vision/question")
     async def vision_question(

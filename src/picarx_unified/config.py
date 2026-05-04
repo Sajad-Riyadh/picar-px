@@ -119,6 +119,12 @@ class AppConfig:
     greet_cooldown_seconds: float
     tracking_step_degrees: int
     tracking_deadband_px: int
+    tracking_smoothing: float
+    tracking_lost_target_timeout: float
+    tracking_update_interval_ms: int
+    face_min_size: int
+    face_scale_factor: float
+    face_min_neighbors: int
     vision_loop_seconds: float
     motion_object_min_area: int
     autonomous_max_speed: int
@@ -181,7 +187,13 @@ class AppConfig:
             drive_watchdog_seconds=_env_float("PICARX_DRIVE_WATCHDOG_SECONDS", 0.9),
             greet_cooldown_seconds=_env_float("PICARX_GREET_COOLDOWN_SECONDS", 20.0),
             tracking_step_degrees=_env_int("PICARX_TRACKING_STEP_DEGREES", 5),
-            tracking_deadband_px=_env_int("PICARX_TRACKING_DEADBAND_PX", 36),
+            tracking_deadband_px=_env_int("PICARX_TRACKING_DEADBAND_PX", 30),
+            tracking_smoothing=_env_float("PICARX_TRACKING_SMOOTHING", 0.35),
+            tracking_lost_target_timeout=_env_float("PICARX_TRACKING_LOST_TARGET_TIMEOUT", 2.0),
+            tracking_update_interval_ms=_env_int("PICARX_TRACKING_UPDATE_INTERVAL_MS", 120),
+            face_min_size=_env_int("PICARX_FACE_MIN_SIZE", 40),
+            face_scale_factor=_env_float("PICARX_FACE_SCALE_FACTOR", 1.08),
+            face_min_neighbors=_env_int("PICARX_FACE_MIN_NEIGHBORS", 4),
             vision_loop_seconds=_env_float("PICARX_VISION_LOOP_SECONDS", 0.25),
             motion_object_min_area=_env_int("PICARX_MOTION_OBJECT_MIN_AREA", 2400),
             autonomous_max_speed=_env_int("PICARX_AUTONOMOUS_MAX_SPEED", 20),

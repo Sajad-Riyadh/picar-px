@@ -377,6 +377,9 @@ class SessionRenderer {
   renderVisionSnapshot(vision, session = this.state.session) {
     if (!vision || !session) return;
     const primary = vision.detections?.[0] ?? null;
+    const trackingState = vision.tracking_state ?? "idle";  // idle | active | lost | recentering
+    const autoFollowOn = !!session.settings.auto_tracking_enabled;
+
     const detectionText = !session.settings.detection_enabled
       ? "Detect: Off"
       : vision.detections?.length ? `Detect: ${vision.detections.length}` : "Detect: Idle";
@@ -391,10 +394,29 @@ class SessionRenderer {
     if (this.dom.personDetectedLabel) this.dom.personDetectedLabel.textContent = session.person_detected ? "Yes" : "No";
     if (this.dom.detectedClassesLabel) this.dom.detectedClassesLabel.textContent = formatDetectedClasses(vision);
     if (this.dom.visionUpdatedLabel) this.dom.visionUpdatedLabel.textContent = formatTimestamp(vision.analyzed_at);
+
+    // HUD person pill: shows detection label when idle, tracking state when auto-follow is on
     if (this.dom.hudPerson) {
-      this.dom.hudPerson.hidden = !primary;
-      if (primary) this.dom.hudPerson.textContent = detectionName(primary);
+      if (autoFollowOn && trackingState !== "idle") {
+        this.dom.hudPerson.hidden = false;
+        const trackLabels = {
+          active: primary ? `Tracking: ${detectionName(primary)}` : "Tracking",
+          lost: "Follow: Lost",
+          recentering: "Recentering",
+        };
+        this.dom.hudPerson.textContent = trackLabels[trackingState] ?? detectionName(primary);
+        // Colour-code the pill by tracking phase
+        this.dom.hudPerson.dataset.trackState = trackingState;
+      } else if (primary) {
+        this.dom.hudPerson.hidden = false;
+        this.dom.hudPerson.textContent = detectionName(primary);
+        this.dom.hudPerson.dataset.trackState = "";
+      } else {
+        this.dom.hudPerson.hidden = true;
+        this.dom.hudPerson.dataset.trackState = "";
+      }
     }
+
     if (this.dom.hudAuto) {
       const autoEnabled = !!session.settings.autonomous_mode_enabled;
       this.dom.hudAuto.hidden = !autoEnabled;

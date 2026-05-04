@@ -460,6 +460,11 @@ button {
   color: var(--danger);
 }
 
+/* Auto-follow tracking state colour coding on the hud-person pill */
+#hud-person[data-track-state="active"]  { color: var(--success, #34d399); }
+#hud-person[data-track-state="lost"]    { color: var(--warning, #fbbf24); }
+#hud-person[data-track-state="recentering"] { color: var(--accent); }
+
 .hud-data {
   font-family: var(--font-mono);
   font-size: 11px;

@@ -34,8 +34,11 @@ class VisionService:
                 enabled_flag="face_detection_enabled",
                 filenames=("haarcascade_frontalface_default.xml",),
                 source="haar_face",
-                min_size=(40, 40),
+                min_size=(config.face_min_size, config.face_min_size),
+                scale_factor=config.face_scale_factor,
+                min_neighbors=config.face_min_neighbors,
                 confidence=0.76,
+                use_clahe=True,
             ),
             CascadeDetector(
                 label=DetectionLabel.PERSON.value,
@@ -104,6 +107,12 @@ class VisionService:
             "detected_labels": list(snapshot.detected_labels),
             "summary": snapshot.summary,
             "analyzed_at": snapshot.analyzed_at,
+            "detection_config": {
+                "face_scale_factor": self._config.face_scale_factor,
+                "face_min_neighbors": self._config.face_min_neighbors,
+                "face_min_size": self._config.face_min_size,
+                "clahe_enabled": True,
+            },
             "settings": {
                 "detection_enabled": settings.detection_enabled,
                 "face_detection_enabled": settings.face_detection_enabled,

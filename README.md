@@ -695,6 +695,129 @@ The browser dashboard includes camera display controls in the Camera panel. This
 - `Reset Display` returns the frame to `Medium` size and `Camera 4:3` shape.
 - The selected size and shape are saved locally in the browser as `PICARX_VIDEO_DISPLAY_SIZE` and `PICARX_VIDEO_DISPLAY_SHAPE`; they are not saved to backend robot settings.
 
+## Face detection and Auto-follow
+
+### How it works
+
+Face detection runs continuously in a background thread (`VisionService`) using OpenCV Haar cascade classifiers. Before each detection pass the grayscale camera frame is preprocessed with **CLAHE** (Contrast Limited Adaptive Histogram Equalization), which normalises local contrast and significantly improves detection in shadowed, side-lit, or over-exposed conditions without meaningful CPU cost (~1–3 ms on a Pi 4/5).
+
+When **Auto-follow detected target** is enabled, the `RobotBehaviorController` behaviour loop picks the best visible target every ~250 ms (one vision cycle) and moves the pan/tilt camera servos toward it. The tracking pipeline:
+
+1. **Smart target selection** — among all detections, score each candidate by:
+   - *Continuity* (is this near where the face was last seen? ×2 weight) — prevents erratic target switching between multiple faces
+   - *Centre bias* — prefer faces near the frame centre
+   - *Area* — larger = more reliable detection
+2. **Smoothed error** — raw pixel error (target centre vs frame centre) is filtered with an exponential moving average (EMA) before driving servo movement, eliminating jitter from single noisy detections.
+3. **Proportional movement** — servo step scales linearly with the smoothed error magnitude, up to the configured maximum step. Small errors cause small moves; a face at the frame edge causes a full step.
+4. **Deadband** — errors below `PICARX_TRACKING_DEADBAND_PX` pixels are ignored entirely, preventing micro-oscillation when the face is nearly centred.
+5. **Rate limiting** — a minimum interval (`PICARX_TRACKING_UPDATE_INTERVAL_MS`) between servo commands prevents hardware stress regardless of loop speed.
+6. **Lost-target recovery** — if the face disappears, the tracker waits `PICARX_TRACKING_LOST_TARGET_TIMEOUT` seconds before recentering slowly. If the face reappears during that window, tracking resumes immediately.
+
+All camera moves are always clamped by the safety guard to the configured servo limits (`PICARX_PAN_LIMIT`, `PICARX_TILT_UP_LIMIT`, `PICARX_TILT_DOWN_LIMIT`). Tracking never issues motor/drive commands and cannot override emergency stop.
+
+### How to enable / disable it
+
+In the browser dashboard:
+
+- **Camera** panel → toggle **Auto-follow detected target**
+- **AI** panel → toggle **Auto-track detected target**
+- **Settings** panel → *Greeting and Behavior* → **Auto camera tracking**
+
+Or via the REST API:
+
+```bash
+# Enable
+curl -X POST http://127.0.0.1:8080/api/settings \
+  -H "Content-Type: application/json" \
+  -d '{"auto_tracking_enabled": true}'
+
+# Disable
+curl -X POST http://127.0.0.1:8080/api/settings \
+  -H "Content-Type: application/json" \
+  -d '{"auto_tracking_enabled": false}'
+```
+
+### How to tune it
+
+Add any of these to your `.env` file (or export as environment variables):
+
+| Variable | Default | Description |
+|---|---|---|
+| `PICARX_FACE_MIN_SIZE` | `40` | Minimum face size in pixels (square). Lower → detect smaller/farther faces, more false positives. |
+| `PICARX_FACE_SCALE_FACTOR` | `1.08` | Cascade scale pyramid step. `1.05`–`1.10`: finer = better recall, more CPU. |
+| `PICARX_FACE_MIN_NEIGHBORS` | `4` | Minimum neighbours for a positive detection. Lower → more detections, more false positives. |
+| `PICARX_TRACKING_DEADBAND_PX` | `30` | Error below this (px) is ignored. Raise to reduce micro-jitter, lower for tighter tracking. |
+| `PICARX_TRACKING_STEP_DEGREES` | `5` | Maximum servo step per update. The actual step is proportional to error magnitude. |
+| `PICARX_TRACKING_SMOOTHING` | `0.35` | EMA alpha (0–1). Lower = more smoothing/lag; higher = more responsive/jittery. |
+| `PICARX_TRACKING_LOST_TARGET_TIMEOUT` | `2.0` | Seconds to wait after losing target before recentering (allows brief occlusions). |
+| `PICARX_TRACKING_UPDATE_INTERVAL_MS` | `120` | Minimum ms between servo commands. Increase to reduce servo chatter. |
+| `PICARX_VISION_LOOP_SECONDS` | `0.25` | Seconds between vision analysis frames. |
+
+After editing `.env`, restart the service:
+
+```bash
+sudo systemctl restart picarx-unified.service
+```
+
+### How to verify smoother tracking
+
+Check the vision and tracking diagnostics:
+
+```bash
+# Detection config and detector status
+curl http://127.0.0.1:8080/api/health | python3 -m json.tool | grep -A 20 '"vision"'
+
+# Current detections and tracking phase
+curl http://127.0.0.1:8080/api/vision | python3 -m json.tool
+```
+
+The `/api/vision` response includes `"tracking_state"` which is one of:
+- `"idle"` — auto-follow is off or no target ever seen
+- `"active"` — currently tracking a target
+- `"lost"` — target just disappeared, waiting before recentering
+- `"recentering"` — returning camera to centre
+
+The browser HUD **Target** pill changes colour:
+- **Green** `Tracking: Face` — actively tracking
+- **Yellow** `Follow: Lost` — target lost, holding
+- **Cyan** `Recentering` — camera returning to centre
+
+Enable debug-level logs to see per-frame tracking detail (EMA error, pan/tilt moves, target scoring):
+
+```bash
+# In .env
+PICARX_LOG_LEVEL=DEBUG
+# Or at startup
+LOG_LEVEL=DEBUG python -m picarx_unified
+```
+
+### Common issues
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| Camera jitters left/right rapidly | Deadband too small or smoothing too high | Increase `PICARX_TRACKING_DEADBAND_PX` (try 40–60) or lower `PICARX_TRACKING_SMOOTHING` (try 0.2) |
+| Face often missed | `face_min_neighbors` too high or face too small | Lower `PICARX_FACE_MIN_NEIGHBORS` to 3; lower `PICARX_FACE_MIN_SIZE` to 30 |
+| Switches between two faces erratically | No target continuity | Already fixed by continuity scoring; if still happening, stand further apart |
+| Tracking is too sluggish / laggy | Smoothing alpha too low | Raise `PICARX_TRACKING_SMOOTHING` to 0.5–0.6 |
+| Camera drifts to wrong target on re-entry | Stale `_tracked_cx/cy` | Will resolve on next detection cycle; increase continuity by staying in frame |
+| Servos make grinding noise | Commands too fast | Increase `PICARX_TRACKING_UPDATE_INTERVAL_MS` to 200+ |
+
+### Rollback steps
+
+If tracking changes cause problems, revert by restoring the previous `.env` values (or removing the new keys — they all have safe defaults) and restarting:
+
+```bash
+sudo systemctl restart picarx-unified.service
+```
+
+To hard-revert all tracking code changes (git):
+
+```bash
+git stash   # or git checkout -- src/picarx_unified/behaviors.py src/picarx_unified/vision_detectors.py src/picarx_unified/vision.py src/picarx_unified/config.py
+```
+
+---
+
 ## 8. WiFi Deauthentication Attack Feature
 
 ### ⚠️ LEGAL WARNING
