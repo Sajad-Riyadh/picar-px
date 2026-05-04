@@ -351,8 +351,10 @@ install_systemd_service() {
   cat > "$tmp_service" <<EOF
 [Unit]
 Description=PiCar-X Unified Control Stack
-After=network-online.target sound.target
-Wants=network-online.target
+[Unit]
+Description=PiCar-X Unified Control Stack
+After=network-online.target sound.target avahi-daemon.service
+Wants=network-online.target avahi-daemon.service
 
 [Service]
 Type=simple
@@ -374,6 +376,31 @@ CapabilityBoundingSet=CAP_NET_RAW CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_SYS_RAW
 AmbientCapabilities=CAP_NET_RAW CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_SYS_RAWIO CAP_SYS_ADMIN
 # Allow all device access (needed for I2C, GPIO, camera, etc.)
 DevicePolicy=auto
+ExecStartPre=/bin/bash -c '\
+  set -e; \
+  ENV_FILE=$ENV_FILE; \
+  CERT=$PROJECT_DIR/certs/picarx.crt; \
+  KEY=$PROJECT_DIR/certs/picarx.key; \
+  if [ -f "\$ENV_FILE" ]; then \
+    c=\$(grep -E "^PICARX_SSL_CERTFILE=" "\$ENV_FILE" | cut -d= -f2- | tr -d "\" \047"); \
+    k=\$(grep -E "^PICARX_SSL_KEYFILE="  "\$ENV_FILE" | cut -d= -f2- | tr -d "\" \047"); \
+    [ -n "\$c" ] && CERT=$PROJECT_DIR/\$c; \
+    [ -n "\$k" ] && KEY=$PROJECT_DIR/\$k; \
+    case "\$CERT" in /*) ;; *) CERT=$PROJECT_DIR/\$CERT ;; esac; \
+    case "\$KEY"  in /*) ;; *) KEY=$PROJECT_DIR/\$KEY   ;; esac; \
+  fi; \
+  HTTPS=\$(grep -E "^PICARX_HTTPS_ENABLE=" "\$ENV_FILE" 2>/dev/null | cut -d= -f2- | tr -d " " | tr "[:upper:]" "[:lower:]"); \
+  if [ "\$HTTPS" = "true" ] || [ "\$HTTPS" = "1" ] || [ "\$HTTPS" = "yes" ]; then \
+    if [ ! -f "\$CERT" ] || [ ! -f "\$KEY" ]; then \
+      mkdir -p "\$(dirname \$CERT)" "\$(dirname \$KEY)"; \
+      HOST=\$(hostname 2>/dev/null || echo picarx); \
+      CFG=\$(mktemp /tmp/picarx-ssl-XXXXXX.cnf); \
+      printf "[req]\ndistinguished_name=dn\nx509_extensions=v3_req\nprompt=no\n[dn]\nCN=picarx.local\n[v3_req]\nsubjectAltName=@alt\n[alt]\nDNS.1=picarx.local\nDNS.2=%s\nDNS.3=%s.local\nIP.1=127.0.0.1\n" "\$HOST" "\$HOST" > "\$CFG"; \
+      openssl req -x509 -newkey rsa:2048 -nodes -keyout "\$KEY" -out "\$CERT" -days 365 -config "\$CFG" >/dev/null 2>&1; \
+      rm -f "\$CFG"; \
+      chmod 600 "\$KEY"; chmod 644 "\$CERT"; \
+    fi; \
+  fi'
 ExecStartPre=/bin/bash -c 'for i in {1..30}; do i2cdetect -y 1 | grep -q "14" && exit 0; sleep 2; done; i2cdetect -y 1 || true'
 ExecStart=$VENV_DIR/bin/python -m picarx_unified
 Restart=on-failure
