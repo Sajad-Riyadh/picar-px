@@ -27,7 +27,6 @@ const ENDPOINTS = {
   audioTarget: "/api/audio/target",
   emergencyStop: "/api/emergency-stop",
   emergencyReset: "/api/emergency-reset",
-  visionQuestion: "/api/vision/question",
   voiceSocket: "/ws/voice",
   jammerRobotNetwork: "/api/jammer/robot_network",
   jammerScan: "/api/jammer/scan",
@@ -219,10 +218,6 @@ class DomRegistry {
     this.catDetectionToggle = $("#cat-detection-toggle");
     this.objectDetectionToggle = $("#object-detection-toggle");
     this.overlayToggle = $("#overlay-toggle");
-    this.visionForm = $("#vision-form");
-    this.visionQuestion = $("#vision-question");
-    this.visionAnswer = $("#vision-answer");
-    this.promptChips = $$(".prompt-chip");
 
     this.settingsForm = $("#settings-form");
     this.greetingTextInput = $("#greeting-text-input");
@@ -1586,20 +1581,6 @@ class PiCarDashboard {
     await this.updateCamera(pan, tilt);
   }
 
-  async submitVisionQuestion(question) {
-    if (!question) return;
-    this.dom.visionAnswer.textContent = "Thinking...";
-    try {
-      const response = await this.apiClient.request(ENDPOINTS.visionQuestion, {
-        method: "POST",
-        json: { question },
-      });
-      this.dom.visionAnswer.textContent = response.answer;
-    } catch (error) {
-      this.dom.visionAnswer.textContent = error.message;
-    }
-  }
-
   bindMomentaryPointerControl(node, { start, stop }) {
     let pointerId = null;
     const release = () => {
@@ -1749,17 +1730,6 @@ class PiCarDashboard {
     this.settingsController.bindInstantToggle(this.dom.catDetectionToggle, () => ({ cat_detection_enabled: this.dom.catDetectionToggle.checked }));
     this.settingsController.bindInstantToggle(this.dom.objectDetectionToggle, () => ({ object_detection_enabled: this.dom.objectDetectionToggle.checked }));
     this.settingsController.bindInstantToggle(this.dom.overlayToggle, () => ({ detection_overlay_enabled: this.dom.overlayToggle.checked }));
-
-    this.dom.visionForm.addEventListener("submit", event => {
-      event.preventDefault();
-      this.submitVisionQuestion(this.dom.visionQuestion.value.trim());
-    });
-    this.dom.promptChips.forEach(button => {
-      button.addEventListener("click", () => {
-        this.dom.visionQuestion.value = button.dataset.prompt ?? "";
-        this.submitVisionQuestion(button.dataset.prompt);
-      });
-    });
 
     this.dom.settingsForm.addEventListener("submit", async event => {
       event.preventDefault();

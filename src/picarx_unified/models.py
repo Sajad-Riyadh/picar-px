@@ -61,10 +61,6 @@ class AudioTargetRequest(BaseModel):
     target: AudioTarget
 
 
-class VisionQuestionRequest(BaseModel):
-    question: str = Field(min_length=1, max_length=500)
-
-
 class SettingsState(BaseModel):
     greeting_text: str = Field(default="Hello there. Welcome.", min_length=1, max_length=160)
     greeting_enabled: bool = True

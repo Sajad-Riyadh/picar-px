@@ -245,11 +245,11 @@ class AIService:
                     text=(
                         f"Camera summary: {vision_summary}\n"
                         f"User transcript: {transcript}\n"
-                        "Reply in 1-3 short sentences."
+                        "Reply naturally and completely. Be concise but never cut off mid-thought."
                     )
                 )
             ],
-            max_output_tokens=180,
+            max_output_tokens=self._config.ai_reply_max_tokens,
             model=self._config.gemini_live_model,
         )
         return response.text
@@ -263,7 +263,7 @@ class AIService:
         response = await self._live_text_turn(
             system_instruction=(
                 "You are the voice of a PiCar-X robot greeting a person who just appeared "
-                "in front of the camera. Keep the reply warm, short, and safe. "
+                "in front of the camera. Keep the reply warm and safe. "
                 "Do not mention driving or claim motor control."
             ),
             parts=[
@@ -271,11 +271,11 @@ class AIService:
                     text=(
                         f"Preferred greeting phrase: {greeting_text}\n"
                         f"Current camera summary: {vision_summary}\n"
-                        "Speak in 1-2 short sentences and invite the person to talk."
+                        "Greet the person warmly and invite them to talk. Finish your sentence completely."
                     )
                 )
             ],
-            max_output_tokens=120,
+            max_output_tokens=self._config.ai_greeting_max_tokens,
             model=self._config.gemini_live_model,
         )
         return response.text
@@ -299,11 +299,11 @@ class AIService:
                         text=(
                             f"Camera summary: {vision_summary}\n"
                             f"User transcript: {transcript}\n"
-                            "Reply in 1-3 short sentences."
+                            "Reply naturally and completely. Be concise but never cut off mid-thought."
                         )
                     )
                 ],
-                max_output_tokens=180,
+                max_output_tokens=self._config.ai_reply_max_tokens,
                 model=self._config.gemini_native_audio_model,
             )
             if response.audio_wav or response.text:
@@ -326,42 +326,6 @@ class AIService:
             logger.exception("Gemini text reply fallback failed; using local fallback reply.")
         return self._fallback_reply(transcript, vision_summary), None
 
-    async def answer_vision(
-        self,
-        question: str,
-        vision_summary: str,
-        frame_jpeg: bytes | None = None,
-    ) -> str:
-        if self._client is None or not frame_jpeg:
-            return self._fallback_vision_answer(question, vision_summary)
-        assert types is not None
-        try:
-            response = await self._live_text_turn(
-                system_instruction=(
-                    "Answer questions about the robot camera view. "
-                    "Do not invent motor actions or unseen objects."
-                ),
-                parts=[
-                    types.Part(
-                        text=(
-                            f"Current local detection summary: {vision_summary}\n"
-                            f"Question: {question}"
-                        )
-                    ),
-                    types.Part(
-                        inline_data=types.Blob(
-                            data=frame_jpeg,
-                            mime_type="image/jpeg",
-                        )
-                    ),
-                ],
-                max_output_tokens=220,
-            )
-            return response.text or self._fallback_vision_answer(question, vision_summary)
-        except Exception:
-            logger.exception("Gemini vision answer failed; using local vision fallback.")
-            return self._fallback_vision_answer(question, vision_summary)
-
     async def generate_detection_greeting(
         self,
         greeting_text: str,
@@ -377,7 +341,7 @@ class AIService:
             response = await self._live_audio_turn(
                 system_instruction=(
                     "You are the voice of a PiCar-X robot greeting a person who just appeared "
-                    "in front of the camera. Keep the reply warm, short, and safe. "
+                    "in front of the camera. Keep the reply warm and safe. "
                     "Do not mention driving or claim motor control."
                 ),
                 parts=[
@@ -385,11 +349,11 @@ class AIService:
                         text=(
                             f"Preferred greeting phrase: {greeting_text}\n"
                             f"Current camera summary: {vision_summary}\n"
-                            "Speak in 1-2 short sentences and invite the person to talk."
+                            "Greet the person warmly and invite them to talk. Finish your sentence completely."
                         )
                     )
                 ],
-                max_output_tokens=120,
+                max_output_tokens=self._config.ai_greeting_max_tokens,
                 model=self._config.gemini_native_audio_model,
             )
             if response.audio_wav or response.text:
@@ -480,9 +444,4 @@ class AIService:
             f"My current local scene summary is: {vision_summary}"
         )
 
-    def _fallback_vision_answer(self, question: str, vision_summary: str) -> str:
-        _ = question
-        return (
-            "This first-version local vision answer is based on onboard detections only. "
-            f"Current summary: {vision_summary}"
-        )
+

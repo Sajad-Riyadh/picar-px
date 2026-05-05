@@ -15,7 +15,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from .config import AppConfig
 from .models import (
     AudioTargetRequest, CameraRequest, DriveRequest, ModeRequest,
-    SettingsUpdateRequest, VisionQuestionRequest
+    SettingsUpdateRequest
 )
 from .runtime import RobotRuntime
 from .safety import SafetyViolation
@@ -222,15 +222,6 @@ def create_app() -> FastAPI:
         data = snapshot.model_dump()
         data["tracking_state"] = runtime.behaviors.tracking_state
         return data
-
-    @app.post("/api/vision/question")
-    async def vision_question(
-        request: Request,
-        body: VisionQuestionRequest,
-        _: None = Depends(_authorize),
-    ):
-        answer = await _get_runtime(request).answer_vision_question(body.question)
-        return JSONResponse({"answer": answer})
 
     @app.get("/stream.mjpg")
     async def video_stream(request: Request):

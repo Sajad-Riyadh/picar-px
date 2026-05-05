@@ -352,11 +352,6 @@ class RobotRuntime:
         self.store.persist_emergency_stop(False)
         return self._publish_state(session)
 
-    async def answer_vision_question(self, question: str) -> str:
-        snapshot = self.vision.get_snapshot()
-        frame = self.vision.get_frame_jpeg()
-        return await self.ai.answer_vision(question, snapshot.summary, frame)
-
     async def handle_ai_turn(self, transcript: str) -> str:
         snapshot = self.vision.get_snapshot()
         session = self.store.load()

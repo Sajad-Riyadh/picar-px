@@ -134,6 +134,8 @@ class AppConfig:
     hardware_init_mode: str
     force_mock_camera: bool
     hog_enabled: bool
+    ai_reply_max_tokens: int
+    ai_greeting_max_tokens: int
     api_token: str | None
     gemini_api_key: str | None
     gemini_live_model: str
@@ -214,6 +216,11 @@ class AppConfig:
             # power spike that causes undervoltage reboots on marginal PSUs.
             # Set PICARX_HOG_ENABLED=true in .env to opt in.
             hog_enabled=_env_flag("PICARX_HOG_ENABLED", False),
+            # Token limits for Gemini Live replies. The previous default of 180
+            # was too low and caused audio to be cut off mid-sentence.
+            # Increase these if longer answers are still truncated.
+            ai_reply_max_tokens=_env_int("PICARX_AI_REPLY_MAX_TOKENS", 1024),
+            ai_greeting_max_tokens=_env_int("PICARX_AI_GREETING_MAX_TOKENS", 512),
             api_token=_env_text("PICARX_API_TOKEN"),
             gemini_api_key=_env_text("GEMINI_API_KEY"),
             gemini_live_model=_env_text("GEMINI_LIVE_MODEL", "gemini-3.1-flash-live-preview")
