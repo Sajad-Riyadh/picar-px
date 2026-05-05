@@ -7,25 +7,25 @@ Wants=network-online.target avahi-daemon.service
 Type=simple
 User=root
 Group=root
-WorkingDirectory=/root/picar-px
-EnvironmentFile=-/root/picar-px/.env
-Environment=PATH=/root/picar-px/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+WorkingDirectory=/home/car/picar-px
+EnvironmentFile=-/home/car/picar-px/.env
+Environment=PATH=/home/car/picar-px/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 Environment=HOME=/root
 Environment=USER=root
 Environment=LOGNAME=root
 Environment=PYTHONUNBUFFERED=1
-Environment=PYTHONPATH=/root/picar-px/src
+Environment=PYTHONPATH=/home/car/picar-px/src
 # Allow write access to project and PiCar-X config directories
 ProtectSystem=false
 ProtectHome=false
-ReadWritePaths=/root/picar-px /opt/picar-x
+ReadWritePaths=/home/car/picar-px /opt/picar-x
 # Add network capabilities for WiFi monitor mode and packet capture
 CapabilityBoundingSet=CAP_NET_RAW CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_SYS_RAWIO CAP_SYS_ADMIN
 AmbientCapabilities=CAP_NET_RAW CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_SYS_RAWIO CAP_SYS_ADMIN
 # Allow all device access (needed for I2C, GPIO, camera, etc.)
 DevicePolicy=auto
 ExecStartPre=/bin/bash -c 'for i in {1..30}; do i2cdetect -y 1 | grep -q "14" && exit 0; sleep 2; done; i2cdetect -y 1 || true'
-ExecStart=/root/picar-px/.venv/bin/python -m picarx_unified
+ExecStart=/home/car/picar-px/.venv/bin/python -m picarx_unified
 Restart=on-failure
 RestartSec=5
 StandardOutput=journal

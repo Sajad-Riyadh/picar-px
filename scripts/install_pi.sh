@@ -1,7 +1,18 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SOURCE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Install to /opt/picar-px to avoid noexec /home filesystem issues on some Pi setups.
+# If cloned directly into /opt/picar-px already, stay there.
+if [[ "$SOURCE_DIR" == /opt/picar-px ]]; then
+  PROJECT_DIR="/opt/picar-px"
+else
+  PROJECT_DIR="/opt/picar-px"
+  if [[ ! -d "$PROJECT_DIR" ]]; then
+    mkdir -p "$PROJECT_DIR"
+    cp -r "$SOURCE_DIR/." "$PROJECT_DIR/"
+  fi
+fi
 VENV_DIR="$PROJECT_DIR/.venv"
 ENV_FILE="$PROJECT_DIR/.env"
 ENV_EXAMPLE_FILE="$PROJECT_DIR/.env.example"

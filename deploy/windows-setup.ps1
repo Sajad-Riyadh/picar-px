@@ -26,8 +26,8 @@ $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIden
 
 if (-not $isAdmin) {
     Write-Host "Requesting administrator privileges..." -ForegroundColor Yellow
-    $args = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "`"$PSCommandPath`"", "-PiIp", $PiIp)
-    Start-Process powershell -Verb RunAs -ArgumentList $args -Wait
+    $elevateArgs = "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" -PiIp $PiIp"
+    Start-Process powershell -Verb RunAs -ArgumentList $elevateArgs -Wait
     exit
 }
 

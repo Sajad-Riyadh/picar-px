@@ -47,6 +47,7 @@ def main() -> None:
         host=config.host,
         port=config.port,
         reload=False,
+        loop="asyncio",
         **ssl_kwargs,
     )
 
