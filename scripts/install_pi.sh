@@ -239,7 +239,8 @@ ensure_virtualenv() {
     "filelock>=3.16.1" \
     "pydantic>=2.9.0" \
     "google-genai>=1.72.0"
-  venv_pip install --no-deps "$PROJECT_DIR"
+  # Uninstall venv-installed numpy/opencv/simplejpeg before installing the project
+  # so we don't get binary incompatibility with the system picamera2/simplejpeg.
   venv_pip uninstall -y \
     numpy \
     opencv-python \
@@ -248,6 +249,8 @@ ensure_virtualenv() {
     simplejpeg >/dev/null 2>&1 || true
   # Rebuild simplejpeg from source to match the system numpy version (avoids binary incompatibility)
   venv_pip install simplejpeg --no-binary simplejpeg
+  # Install the project package (non-editable so it works under systemd without PYTHONPATH tricks)
+  venv_pip install "$PROJECT_DIR"
 }
 
 ensure_env_file() {
