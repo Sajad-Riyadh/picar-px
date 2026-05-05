@@ -25,7 +25,7 @@ AmbientCapabilities=CAP_NET_RAW CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_SYS_RAWIO
 # Allow all device access (needed for I2C, GPIO, camera, etc.)
 DevicePolicy=auto
 ExecStartPre=/bin/bash -c 'for i in {1..30}; do i2cdetect -y 1 | grep -q "14" && exit 0; sleep 2; done; i2cdetect -y 1 || true'
-ExecStart=/home/car/picar-px/.venv/bin/python -m picarx_unified
+ExecStart=/bin/bash -lc 'cd /home/car/picar-px && exec env PYTHONPATH=/home/car/picar-px/src /home/car/picar-px/.venv/bin/python -m picarx_unified'
 Restart=on-failure
 RestartSec=5
 StandardOutput=journal
