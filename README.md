@@ -1,34 +1,47 @@
 # PiCar-X Unified
 
-## Installation
-Run the following on a fresh Raspberry Pi:
+## Quick Installation
+
+On a fresh Raspberry Pi 5, run this one command:
+
 ```bash
 bash scripts/install_pi.sh
 ```
 
-## Overview
-PiCar-X Unified is a control stack for the SunFounder PiCar-X. It provides:
-- A FastAPI backend with REST endpoints, MJPEG streaming, and WebSocket audio.
-- Decoupled modules for voice, safety, vision, and behavior features.
-- Compatibility with the official SunFounder PiCar-X hardware API.
+This will:
+1. Install all required system packages (including aircrack-ng for WiFi features)
+2. Install the SunFounder PiCar-X Python stack
+3. Create a Python virtual environment
+4. Set up the systemd service with all necessary permissions
+5. Start the application
 
-### Architecture
-The design layers include:
-- **Browser UI**:
-  - REST API
-  - WebSocket voice loop.
-- **Runtime Coordination**:
-  - Safety guard, voice/audio, and vision modules.
-- **Hardware Integration**:
-  - Motors, camera pan/tilt, ultrasonic sensors through the SunFounder API.
+The service will be automatically enabled and started. Access the web interface at `http://<your-pi-ip>:8080`.
 
-For detailed usage, please consult the documentation in respective files.
+### Installation Options
 
-## Quick Start
-Start the API interface and dashboard:
 ```bash
-docker-compose up
-```
-Access the dashboard at `http://<raspberry-pi-ip>:8080`.
+# Install only (don't start the app)
+bash scripts/install_pi.sh --install-only
 
-For systemd integration, advanced configurations, or troubleshooting, refer to expanded documentation in the `/docs` directory if available.
+# Start as systemd service instead of foreground
+bash scripts/install_pi.sh --service
+
+# Run in mock mode (no hardware required)
+bash scripts/install_pi.sh --mock
+
+# Skip SunFounder stack installation
+bash scripts/install_pi.sh --skip-sunfounder
+```
+
+### WiFi Capabilities
+
+The PiCar-X Unified project includes WiFi functionality enabling:
+- Secure authorized network control.
+- Enhanced connectivity via pre-configured WiFi modules.
+- Educational module for demonstrating WiFi operations responsibly (includes network scanning options).
+
+Refer to additional WiFi setup instructions in the `docs/wifi_features.md` file if available.
+
+---
+
+For full details about the architecture, features, and command details like systemd integrations, continue exploring the respective sections from the expanded README or inline code documentation when available.
